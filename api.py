@@ -1,5 +1,6 @@
 from utils.hash import hash_key
 from Structures.file_objcts import Page, MetaData
+from Structures.replica import *
 from config import M, PAGE_SIZE
 import bisect
 import uuid
@@ -17,7 +18,9 @@ class DFS:
   
   def get_metadata(self, file_name):
     key = self.metadata_key(file_name)
-    obj = self.entry_node.get(key)
+    replicas = self.get_replicas(key)
+    obj = read_replicas(key, replicas)
+
 
     if obj is None:
       return None
@@ -26,7 +29,10 @@ class DFS:
     return obj
   
   def set_metadata(self, metadata):
-    self.entry_node.set(metadata.key, metadata)
+    replicas = self.get_replicas(metadata.key)
+    metadata.replica_nodes = [node.id for node in replicas]
+    write_replicas(metadata.key, metadata, replicas)
+    # self.entry_node.set(metadata.key, metadata)
 
   def get_page(self, page_key : int):
     obj = self.entry_node.get(page_key)
@@ -57,6 +63,10 @@ class DFS:
 
     self.set_metadata(metadata)
     return f"SUCCESS: appended {len(chunks)} page(s) to '{file_name}'"
+  
+  def get_replicas(self, key):
+    primary = self.chord.find_succ(key)
+    return get_replica_nodes(self.chord, primary)
 
 
   """ Required DFS Operations """
@@ -151,17 +161,21 @@ class DFS:
     for page_key in metadata.page_keys:
       self.entry_node.delete(page_key)
 
-    self.entry_node.delete(metadata.key)
+    replicas = self.get_replicas(metadata.key)
+    for node in replicas:
+      node.store.pop(metadata.key, None)
     return f"SUCCESS: '{file_name}' deleted"
   
 
   def ls(self):
     ''' List all files in chord '''
     files = []
+    seen = set()
     for node in self.chord.nodes.values():
-      for key, obj in node.store.items():
-        if obj.type == 'MetaData':
+      for _, obj in node.store.items():
+        if obj.type == 'MetaData' and obj.file_name not in seen:
           files.append(obj.file_name)
+          seen.add(obj.file_name)
 
     if not files:
       return "Directory empty"

@@ -2,6 +2,40 @@
 from Structures.chord import Chord, Node
 from api import DFS
 
+def test_replication(chord, dfs):
+    print("\n=== Replication Test ===")
+
+    dfs.touch("replicated.txt")
+
+    with open("rep_input.txt", "w") as f:
+        f.write("this is a replicated file\n" * 10)
+
+    print(dfs.append("replicated.txt", "rep_input.txt"))
+    print(dfs.stat("replicated.txt"))
+
+    # show which nodes hold the metadata
+    print("\nreplica node ids:")
+    meta = dfs.get_metadata("replicated.txt")
+    print(meta.replica_nodes)
+
+    # show that all 3 replica nodes actually have it in their store
+    print("\nverifying replicas in store:")
+    for node_id in meta.replica_nodes:
+        node = chord.nodes[node_id]
+        has_it = meta.key in node.store
+        print(f"  node {node_id}: {'YES' if has_it else 'NO'}")
+
+    # simulate primary node failure — remove metadata from primary
+    primary_id = meta.replica_nodes[0]
+    primary_node = chord.nodes[primary_id]
+    del primary_node.store[meta.key]
+    print(f"\nsimulated crash of primary node {primary_id}")
+
+    # read should still work via replicas
+    print("read after primary crash:")
+    print(dfs.read("replicated.txt")[:50])
+
+
 def test_sort(dfs):
     print("\n=== Sort Test ===")
 
@@ -113,3 +147,4 @@ if __name__ == "__main__":
     dfs = DFS(chord, entry)
     test_dfs(dfs)
     test_sort(dfs)
+    test_replication(chord, dfs)

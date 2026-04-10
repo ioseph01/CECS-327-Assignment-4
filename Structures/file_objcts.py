@@ -38,11 +38,12 @@ class Page:
 
 class MetaData:
 
-  def __init__(self, key : str, file_name : str, page_keys : list, file_size=0):
+  def __init__(self, key : str, file_name : str, page_keys : list, file_size=0, replica_nodes=[]):
     self.key = key
     self.file_name = file_name
     self.page_keys = page_keys
     self.file_size = file_size
+    self.replica_nodes = replica_nodes
 
   @property
   def page_count(self):
@@ -61,6 +62,7 @@ class MetaData:
         "page_keys": self.page_keys,
         "page_count": self.page_count,
         "type": self.type,
+        "replica_nodes": self.replica_nodes
     }
   
   @classmethod
@@ -70,6 +72,7 @@ class MetaData:
         file_name=data["file_name"],
         page_keys=data.get("page_keys", []),
         file_size=data["file_size"],
+        replica_nodes=data.get("replica_nodes", []),
     )
   
 
