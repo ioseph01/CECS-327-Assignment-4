@@ -29,8 +29,6 @@ def test_sort(dfs):
     # sort
     print(dfs.sort_file("input.csv", "output.csv"))
 
-    # print(dfs.sort_file("input.csv", "output.csv"))
-
     # debug
     meta = dfs.get_metadata("output.csv")
     print(f"output.csv metadata: {meta._export() if meta else None}")
@@ -42,8 +40,6 @@ def test_sort(dfs):
     # verify
     print("\nsorted output:")
     print(dfs.read("output.csv"))
-    # print(dfs.ls())
-    # print(dfs.read("input.csv"))
 
 
 
