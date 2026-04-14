@@ -44,8 +44,10 @@ class Paxos:
       if response == Status.LEARN:
         print(f"  PAXOS: Received LEARN ({ballot}) from node {replica.id}")
         c += 1
+      else:
+        print(f"  PAXOS: Response did not receive a LEARN, {response}")
 
-    majority = len(replica_nodes) // 2 + 1
+    majority = len(alive_replicas) // 2 + 1
     if majority <= c:
       print(f"  PAXOS: Majority reached ({c}/{len(replica_nodes)}), committing")
       for replica in alive_replicas:
@@ -60,6 +62,7 @@ class Paxos:
     if self.ballot <= ballot and self.node.alive:
       self.ballot = ballot
       self.pending[ballot] = metadata
+      print(f"  PAXOS: Node {self.id} accepting ballot {ballot}, self.ballot={self.ballot}")
       return Status.LEARN
     print(f"  PAXOS: Node {self.id} rejecting ballot {ballot}, self.ballot={self.ballot}")
     return Status.REJECT
@@ -118,6 +121,7 @@ class ProxyNode:
       "metadata": metadata._export(),
       "ballot": ballot,
     })
+    print(f"PAXOS Reply: {reply}")
     if reply.get("status") == "error":
       return Status.REJECT
     response_str = reply.get("response", "REJECT")

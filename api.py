@@ -19,18 +19,26 @@ class DFS:
   def get_successive_addresses(self, start_address: str, count: int):
     addresses = []
     current = start_address
-    for _ in range(count):
-      if current not in addresses:
-        addresses.append(current)
-      reply = self.node.send(current, {    
-        "type": "get_succ"
-      })
-      if reply.get("status") == "error":
+    visited = set()
+
+    while len(addresses) < count:
+      if current in visited:
         break
-      next_address = reply.get("address")
-      if next_address is None or next_address == start_address:
+      visited.add(current)
+      addresses.append(current)
+
+      if current == self.node.address:
+        next_address = self.node.succ
+      else:
+        reply = self.node.send(current, {"type": "get_succ"})
+        if reply.get("status") == "error":
+          break
+        next_address = reply.get("address")
+
+      if next_address is None:
         break
       current = next_address
+
     return addresses
 
   def id_from_address(self, address: str):
@@ -71,7 +79,7 @@ class DFS:
 
   def put_metadata(self, metadata):
     replicas = self.get_replica_addresses(metadata.key)
-    metadata.replica_nodes = replicas
+    # metadata.replica_nodes = replicas
 
     lead_addr = min(replicas, key=lambda addr : self.id_from_address(addr))
     if lead_addr == self.node.address:
@@ -243,7 +251,6 @@ class DFS:
     metadata = self.get_metadata(file_name)
     if metadata is None:
       return f"ERROR: File '{file_name}' does not exist"
-    
     info = metadata._export()
     lines = [f"{k}: {v}" for k, v in info.items()]
     return "\n".join(lines)

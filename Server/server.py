@@ -54,7 +54,7 @@ class Server:
     except Exception as e:
       try:
           connection.sendall(json.dumps({
-            "status": "Error",
+            "status": "error",
             "reason": str(e),
           }).encode("utf-8"))
       except:
@@ -111,6 +111,7 @@ class Server:
       return self.node.handle_dfs_ls(message)
 
     elif msg_type == "dfs_stat":
+      print("Server stat.")
       return self.node.handle_dfs_stat(message)
 
     elif msg_type == "dfs_sort":

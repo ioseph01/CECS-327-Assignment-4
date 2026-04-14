@@ -1,4 +1,5 @@
 from utils.hash import hash_key
+from Structures.paxos import ProxyNode
 
 class Page:
 
@@ -52,6 +53,23 @@ class MetaData:
   def type(self):
     return "MetaData"
   
+  # def __setattr__(self, name, value):
+  #   if name == "replica_nodes":
+  #       print(f"REPLICA NODES is being updated to {value}")
+    
+  #   super().__setattr__(name, value)  
+
+  def _export(self):
+    return {
+      "key": self.key,
+      "file_name": self.file_name,
+      "file_size": self.file_size,
+      "page_keys": self.page_keys,
+      "page_count": self.page_count,
+      "type": self.type,
+      "replica_nodes": [{"id": n.id, "address": n.address} for n in self.replica_nodes]
+    }
+
 
   def _export(self) -> dict:
     return {
@@ -61,7 +79,7 @@ class MetaData:
         "page_keys": self.page_keys,
         "page_count": self.page_count,
         "type": self.type,
-        "replica_nodes": self.replica_nodes
+        "replica_nodes": [{"id": n.id, "address": n.address} for n in self.replica_nodes]
     }
   
   @classmethod
@@ -71,8 +89,10 @@ class MetaData:
         file_name=data["file_name"],
         page_keys=data.get("page_keys", []),
         file_size=data["file_size"],
-        replica_nodes=data.get("replica_nodes", []),
+        replica_nodes=[ProxyNode(node['address'], node['id']) for node in data.get("replica_nodes")],
     )
+  
+  
   
 
 
