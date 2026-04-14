@@ -22,21 +22,24 @@ class Paxos:
   def l_propose(self, metadata, replica_nodes : list):
     ''' Leader proposed a metadata update '''
     print(f"  PAXOS: Starting propose, ballot will be {self.ballot + 1}, replica ids={[r.id for r in replica_nodes]}")
-    leader_id = min(replica.id for replica in replica_nodes if replica.alive)
+    alive_replicas = [r for r in replica_nodes if r.alive]
+    if not alive_replicas:
+      print(f"  PAXOS: No alive replicas, aborting")
+      return False
+    
+    leader_id = min(replica.id for replica in alive_replicas)
     if self.id != leader_id or not self.node.alive:
       # Not the leader
       return False
     
-    self.ballot += 1 + max(replica.paxos.ballot for replica in replica_nodes if replica.alive)
+    self.ballot = 1 + max(replica.paxos.ballot for replica in alive_replicas)
     ballot = self.ballot
 
     print(f"\n  PAXOS: Leader: node {self.id}")
     print(f"  PAXOS: Proposing ballot {ballot} for '{metadata.file_name}'")
 
     c = 0
-    for replica in replica_nodes:
-      if not replica.alive:
-        continue
+    for replica in alive_replicas:
       print(f"  PAXOS: Sending ACCEPT ({ballot}) to node {replica.id}")
       response = replica.paxos.f_receive_accept(metadata, ballot)
       if response == Status.LEARN:
@@ -47,9 +50,7 @@ class Paxos:
     if majority <= c:
       print(f"  PAXOS: Majority reached ({c}/{len(replica_nodes)}), committing")
       
-      for replica in replica_nodes:
-        if not replica.alive:
-          continue
+      for replica in alive_replicas:
         replica.paxos.f_receive_commit(metadata, ballot)
       return True
     
@@ -58,7 +59,7 @@ class Paxos:
 
 
   def f_receive_accept(self, metadata, ballot : int):
-    if self.ballot <= ballot:
+    if self.ballot <= ballot and self.node.alive:
       self.ballot = ballot
       self.pending[ballot] = metadata
       return Status.LEARN
@@ -66,7 +67,6 @@ class Paxos:
     print(f"  PAXOS: Node {self.id} rejecting ballot {ballot}, self.ballot={self.ballot}")
 
     return Status.REJECT
-
   
 
   def f_receive_commit(self, metadata, ballot : int):
@@ -93,4 +93,48 @@ class Paxos:
         print(f"    ballot={log['ballot']}, file={log['file_name']}")
 
 
-    
+class ProxyNode:
+  def __init__(self, address, local_node):
+    self.address = address
+    self.node = local_node
+    _, port = address.split(":")
+    self.id = int(port) - 5000
+    self.alive = True
+
+  @property
+  def paxos(self):
+    return self
+  
+  @property
+  def ballot(self):
+    reply = self.send({
+      "type": "get_ballot"
+    })
+    if reply.get("status") == "error":
+      return 0
+    return reply.get("ballot", 0)
+  
+  def send(self, message):
+    return self.node.send(self.address, message)
+  
+  def l_propose(self):
+    pass
+
+  def f_receive_accept(self, metadata, ballot: int):
+    reply = self.send({
+      "type": "paxos_accept",
+      "metadata": metadata._export(),
+      "ballot": ballot,
+    })
+    if reply.get("status") == "error":
+      return Status.REJECT
+    response = reply.get("status", "REJECT")
+    return Status[response]
+  
+  def f_receive_commit(self, metadata, ballot: int):
+    self.send({
+      "type": "paxos_commit",
+      "metadata": metadata._export(),
+      "ballot": ballot,
+    })
+  

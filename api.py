@@ -1,14 +1,43 @@
 from utils.hash import hash_key
 from Structures.file_objcts import Page, MetaData
 from Structures.replica import *
-from config import M, PAGE_SIZE
+from Structures.paxos import ProxyNode
+from config import PAGE_SIZE, R
 import bisect
 import uuid
 
 class DFS:
-  def __init__(self, chord, entry_node):
-    self.chord = chord
-    self.entry_node = entry_node
+  def __init__(self, node):
+    self.node = node
+
+
+  def get_replica_addresses(self, key: int):
+    primary_address = self.node.find_succ(key)
+    return self._get_successive_addresses(primary_address, R)
+
+  def get_successive_addresses(self, start_address: str, count: int):
+    addresses = []
+    current = start_address
+    for _ in range(count):
+      if current not in addresses:
+        addresses.append(current)
+      reply = self.node._send(current, {
+        "type": "get_succ"
+      })
+      if reply.get("status") == "error":
+        break
+      next_address = reply.get("address")
+      if next_address is None or next_address == start_address:
+        break
+      current = next_address
+    return addresses
+
+  def id_from_address(self, address: str):
+      _, port = address.split(":")
+      return int(port) - 5000
+
+  def get_replica_node_objects(self, addresses: list):
+      return [ProxyNode(addr, self.node) for addr in addresses]
 
   def metadata_key(self, file_name : str):
     return hash_key("metadata:" + file_name)
@@ -18,27 +47,43 @@ class DFS:
   
   def get_metadata(self, file_name):
     key = self.metadata_key(file_name)
-    replicas = self.get_replicas(key)
-    obj = read_replicas(key, replicas)
+    replicas = self.get_replica_addresses(key)
 
+    for addr in replicas:
+      if addr == self.node.address:
+        obj = self.node.store.get(key, None)
+      else:
+        reply = self.node.send(addr, {
+          "type": "get",
+          "key": key
+        })
+        obj = reply.get("value", None)
 
-    if obj is None:
-      return None
-    elif isinstance(obj, dict):
-      return MetaData._import(obj)
-    return obj
+      if obj is None:
+        continue
+      elif isinstance(obj, dict):
+        return MetaData._import(obj)
+      return obj
+    
+    return None
   
-  def put_metadata(self, metadata):
-    replicas = self.get_replicas(metadata.key)
-    metadata.replica_nodes = [node.id for node in replicas]
 
-    leader = min(replicas, key=lambda node : node.id)
-    leader.paxos.l_propose(metadata, replicas)
-    # write_replicas(metadata.key, metadata, replicas)
-    # self.entry_node.put(metadata.key, metadata)
+  def put_metadata(self, metadata):
+    replicas = self.get_replica_addresses(metadata.key)
+    metadata.replica_nodes = replicas
+
+    lead_addr = min(replicas, key=lambda addr : self.id_from_address(addr))
+    if lead_addr == self.node.address:
+      metadata.replica_nodes = self.get_replica_node_objects(replicas)
+      self.node.paxos.l_propose(metadata, metadata.replica_nodes)
+    else:
+      self.node.send(lead_addr, {
+        "type": "paxos_propose",
+        "metadata": metadata._export(),
+      })
 
   def get_page(self, page_key : int):
-    obj = self.entry_node.get(page_key)
+    obj = self.node.get(page_key)
 
     if obj is None:
       return None
@@ -60,16 +105,16 @@ class DFS:
         page_number = metadata.page_count
         page_key = self.page_key(file_name, page_number)
         page = Page(page_key, chunk, page_number)
-        self.entry_node.put(page_key, page)
+        self.node.put(page_key, page)
         metadata.page_keys.append(page_key)
         metadata.file_size += len(chunk)
 
     self.put_metadata(metadata)
     return f"SUCCESS: appended {len(chunks)} page(s) to '{file_name}'"
   
-  def get_replicas(self, key):
-    primary = self.chord.find_succ(key)
-    return get_replica_nodes(self.chord, primary)
+  # def get_replicas(self, key):
+  #   primary = self.chord.find_succ(key)
+  #   return get_replica_nodes(self.chord, primary)
 
 
   """ Required DFS Operations """
@@ -97,23 +142,7 @@ class DFS:
     metadata = self.get_metadata(file_name)
     if metadata is None:
       self.touch(file_name)
-      metadata = self.get_metadata(file_name)
-
-    chunks = [contents[i:i + PAGE_SIZE] for i in range(0, len(contents), PAGE_SIZE)]
-    if not chunks or chunks is None:
-      return f"FAILURE: File '{local_path}' is empty, nothing appended"
-    
-    for chunk in chunks:
-      page_number = metadata.page_count
-      page_key = self.page_key(file_name, page_number)
-      page = Page(page_key, chunk, page_number)
-
-      self.entry_node.put(page_key, page)
-      metadata.page_keys.append(page_key)
-      metadata.file_size += 1
-
-    self.put_metadata(metadata)
-    return f"SUCCESS: Appended {len(chunks)} to '{file_name}'"
+    return self.append_contents(file_name, contents)
   
 
   def read(self, file_name: str):
@@ -139,10 +168,7 @@ class DFS:
     contents = self.read(file_name)
     if contents[:5] == "ERROR":
       return contents
-    
-    lines = contents.splitlines()
-    return "\n".join(lines[:n])
-  
+    return "\n".join(contents.splitlines()[:n])
 
   def tail(self, file_name: str, n: int):
     ''' Return last n lines of a file '''
@@ -162,11 +188,16 @@ class DFS:
       return f"ERROR: File '{file_name}' not found"
     
     for page_key in metadata.page_keys:
-      self.entry_node.delete(page_key)
+      self.node.delete(page_key)
 
-    replicas = self.get_replicas(metadata.key)
-    for node in replicas:
-      node.store.pop(metadata.key, None)
+    for addr in metadata.replica_nodes:
+      if addr == self.node.address:
+        self.node.store.pop(metadata.key, None)
+      else:
+        self.node.send(addr, {
+          "type": "delete",
+          "key": metadata.key,
+        })
     return f"SUCCESS: '{file_name}' deleted"
   
 
@@ -174,11 +205,17 @@ class DFS:
     ''' List all files in chord '''
     files = []
     seen = set()
-    for node in self.chord.nodes.values():
-      for _, obj in node.store.items():
-        if obj.type == 'MetaData' and obj.file_name not in seen:
-          files.append(obj.file_name)
-          seen.add(obj.file_name)
+    for _, obj in self.node.store.items():
+      if isinstance(obj, dict) and obj.get("type") == "MetaData":
+        name = obj.get("file_name")
+        if name and name not in seen:
+          files.append(name)
+          seen.add(name)
+        elif hasattr(obj, "type") and obj.type == "MetaData":
+          if obj.file_name not in seen:
+            files.append(obj.file_name)
+            seen.add(obj.file_name)
+
 
     if not files:
       return "Directory empty"
@@ -223,32 +260,52 @@ class DFS:
     # Sort
     job_id = str(uuid.uuid4())
     for k,v in records:
-      target_key = hash_key(k)
-      target_node = self.chord.find_succ(target_key)
-      if job_id not in target_node.sort_buffer:
-        target_node.sort_buffer[job_id] = []
-      bisect.insort(target_node.sort_buffer[job_id], (k,v))
+      target_addr = self.node.find_succ(hash_key(k))
+      if target_addr == self.node.address:
+        if job_id not in self.node.sort_buffer:
+          self.node.sort_buffer[job_id] = []
+        bisect.insort(self.node.sort_buffer[job_id], (k,v))
+      else:
+        self.node.send(target_addr, {
+          "type": "sort_route",
+          "job_id": job_id,
+          "k": k,
+          "v": v,
+        })
 
     # Store
     sorted_records = []
-    for id in self.chord.sorted_ids:
-      node = self.chord.nodes[id]
-      if job_id in node.sort_buffer:
-        sorted_records.extend(node.sort_buffer[job_id])
+    visited = set()
+    current = self.node.address
+    while True:
+      if current in visited:
+        break
+      visited.add(current)
+      if current == self.node.address:
+        records_here = self.node.sort_buffer.pop(job_id, [])
+      else:
+        reply = self.node.send(current, {
+          "type": "sort_collect",
+          "job_id": job_id,
+        })
+        records_here = reply.get("records", [])
+      sorted_records.extend(records_here)
+      reply = self.node.send(current, {
+        "type" : "get_succ"
+      })
+      if reply.get("status") == "error":
+        break
+      next_address = reply.get("address")
+      if next_address is None:
+        break
+      current = next_address
+
     sorted_records.sort(key=lambda pair: pair[0])
 
     # Output
     contents = "\n".join(f"{k},{v}" for k,v in sorted_records)
     self.touch(output_filename)
-    meta_check = self.get_metadata("output.csv")
-    print(f"metadata immediately after touch: {meta_check._export() if meta_check else None}")
     self.append_contents(output_filename, contents)
-    meta_check2 = self.get_metadata("output.csv")
-    print(f"metadata after append_contents: {meta_check2._export() if meta_check2 else None}")
-
-    for node in self.chord.nodes.values():
-      if job_id in node.sort_buffer:
-        del node.sort_buffer[job_id]
 
     return f"SUCCSS: Sorted {len(sorted_records)} records from '{file_name}' into '{output_filename}'"
         

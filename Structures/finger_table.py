@@ -2,13 +2,13 @@
 from config import M
 
 class FingerEntry:
-  def __init__(self, start: int, node=None):
+  def __init__(self, start: int, node_id=None, address=None):
     self.start = start
-    self.node = node
+    self.id = node_id
+    self.address = address
 
   def __repr__(self):
-    node_id = self.node.id if self.node else None
-    return f"FingerEntry(start={self.start}, node={node_id})"
+    return f"FingerEntry(start={self.start}, node_id={self.id}, address={self.address})"
 
 
 class FingerTable:
@@ -22,6 +22,6 @@ class FingerTable:
   def __repr__(self):
     lines = [f"FingerTable for node {self.owner_id}:"]
     for i, entry in enumerate(self.entries):
-        lines.append(f"  [{i}] start={entry.start} -> node={entry.node.id if entry.node else None}")
+      lines.append(f"  [{i}] start={entry.start} -> node_id={entry.id} ({entry.address})")
     return "\n".join(lines)
   
