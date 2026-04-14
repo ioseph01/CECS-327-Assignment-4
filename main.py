@@ -2,6 +2,42 @@
 from Structures.chord import Chord, Node
 from api import DFS
 
+
+def test_paxos(chord, dfs):
+    print("\n=== Paxos Test ===")
+
+    print(dfs.touch("paxos_test.txt"))
+
+    with open("paxos_input.txt", "w") as f:
+        f.write("paxos line\n" * 20)
+
+    print(dfs.append("paxos_test.txt", "paxos_input.txt"))
+
+    meta = dfs.get_metadata("paxos_test.txt")
+    print(f"\nreplica nodes: {meta.replica_nodes}")
+    for node_id in meta.replica_nodes:
+        chord.nodes[node_id].paxos.print_log()
+
+    # simulate proper follower crash
+    crashed_id = meta.replica_nodes[2]
+    crashed_node = chord.nodes[crashed_id]
+    crashed_node.alive = False
+    print(f"\nsimulating crash of follower node {crashed_id}")
+    print(f"node {crashed_id} is now crashed — will not respond to any messages")
+
+    # append again — should still reach majority with 2/3
+    with open("paxos_input2.txt", "w") as f:
+        f.write("after crash line\n" * 20)
+
+    print(dfs.append("paxos_test.txt", "paxos_input2.txt"))
+
+    print("\nread after follower crash:")
+    print(dfs.read("paxos_test.txt")[:80])
+
+    for node_id in meta.replica_nodes:
+        chord.nodes[node_id].paxos.print_log()
+
+
 def test_replication(chord, dfs):
     print("\n=== Replication Test ===")
 
@@ -148,3 +184,4 @@ if __name__ == "__main__":
     test_dfs(dfs)
     test_sort(dfs)
     test_replication(chord, dfs)
+    test_paxos(chord, dfs)

@@ -25,14 +25,17 @@ class DFS:
     if obj is None:
       return None
     elif isinstance(obj, dict):
-      return MetaData._export(obj)
+      return MetaData._import(obj)
     return obj
   
-  def set_metadata(self, metadata):
+  def put_metadata(self, metadata):
     replicas = self.get_replicas(metadata.key)
     metadata.replica_nodes = [node.id for node in replicas]
-    write_replicas(metadata.key, metadata, replicas)
-    # self.entry_node.set(metadata.key, metadata)
+
+    leader = min(replicas, key=lambda node : node.id)
+    leader.paxos.l_propose(metadata, replicas)
+    # write_replicas(metadata.key, metadata, replicas)
+    # self.entry_node.put(metadata.key, metadata)
 
   def get_page(self, page_key : int):
     obj = self.entry_node.get(page_key)
@@ -40,7 +43,7 @@ class DFS:
     if obj is None:
       return None
     elif isinstance(obj, dict):
-      return Page._export(obj)
+      return Page._import(obj)
     return obj
   
 
@@ -57,11 +60,11 @@ class DFS:
         page_number = metadata.page_count
         page_key = self.page_key(file_name, page_number)
         page = Page(page_key, chunk, page_number)
-        self.entry_node.set(page_key, page)
+        self.entry_node.put(page_key, page)
         metadata.page_keys.append(page_key)
         metadata.file_size += len(chunk)
 
-    self.set_metadata(metadata)
+    self.put_metadata(metadata)
     return f"SUCCESS: appended {len(chunks)} page(s) to '{file_name}'"
   
   def get_replicas(self, key):
@@ -79,7 +82,7 @@ class DFS:
     
     key = self.metadata_key(file_name)
     metadata = MetaData(key, file_name, [], 0)
-    self.set_metadata(metadata)
+    self.put_metadata(metadata)
     return f"SUCCESS: '{file_name}' created"
   
 
@@ -97,7 +100,7 @@ class DFS:
       metadata = self.get_metadata(file_name)
 
     chunks = [contents[i:i + PAGE_SIZE] for i in range(0, len(contents), PAGE_SIZE)]
-    if not chunks:
+    if not chunks or chunks is None:
       return f"FAILURE: File '{local_path}' is empty, nothing appended"
     
     for chunk in chunks:
@@ -105,11 +108,11 @@ class DFS:
       page_key = self.page_key(file_name, page_number)
       page = Page(page_key, chunk, page_number)
 
-      self.entry_node.set(page_key, page)
+      self.entry_node.put(page_key, page)
       metadata.page_keys.append(page_key)
       metadata.file_size += 1
 
-    self.set_metadata(metadata)
+    self.put_metadata(metadata)
     return f"SUCCESS: Appended {len(chunks)} to '{file_name}'"
   
 

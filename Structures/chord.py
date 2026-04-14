@@ -1,5 +1,6 @@
 from config import M
 from Structures.finger_table import FingerTable
+from Structures.paxos import Paxos
 
 
 class Chord:
@@ -90,9 +91,11 @@ class Node:
     self.store = {} # Page or MetaData obj
     self.finger_table = FingerTable(id)
     self.sort_buffer = {} # job id : (k,v)
+    self.paxos = Paxos(self, self.store)
+    self.alive = True
 
 
-  def set(self, key: int, value):
+  def put(self, key: int, value):
     target = self.chord.find_succ(key)
     target.store[key] = value
 

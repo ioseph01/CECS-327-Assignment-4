@@ -35,3 +35,5 @@ def write_replicas(key: int, value, replica_nodes: list):
   ''' Write value to all replicas '''
   for node in replica_nodes:
     node.store[key] = value
+
+    

@@ -16,7 +16,6 @@ class Page:
     return "Page"
   
 
-  @classmethod
   def _export(self) -> dict:
     return {
         "key": self.key,
@@ -38,12 +37,12 @@ class Page:
 
 class MetaData:
 
-  def __init__(self, key : str, file_name : str, page_keys : list, file_size=0, replica_nodes=[]):
+  def __init__(self, key : str, file_name : str, page_keys : list, file_size=0, replica_nodes=None):
     self.key = key
     self.file_name = file_name
     self.page_keys = page_keys
     self.file_size = file_size
-    self.replica_nodes = replica_nodes
+    self.replica_nodes = replica_nodes if replica_nodes is not None else []
 
   @property
   def page_count(self):
