@@ -20,7 +20,7 @@ class Paxos:
     return self.node.id
 
   def l_propose(self, metadata, replica_nodes : list):
-    ''' Leader proposed a metadata update '''
+    ''' Leader proposes a metadata update '''
     print(f"  PAXOS: Starting propose, ballot will be {self.ballot + 1}, replica ids={[r.id for r in replica_nodes]}")
     alive_replicas = [r for r in replica_nodes if r.alive]
     if not alive_replicas:
@@ -29,7 +29,6 @@ class Paxos:
     
     leader_id = min(replica.id for replica in alive_replicas)
     if self.id != leader_id or not self.node.alive:
-      # Not the leader
       return False
     
     self.ballot = 1 + max(replica.paxos.ballot for replica in alive_replicas)
@@ -49,7 +48,6 @@ class Paxos:
     majority = len(replica_nodes) // 2 + 1
     if majority <= c:
       print(f"  PAXOS: Majority reached ({c}/{len(replica_nodes)}), committing")
-      
       for replica in alive_replicas:
         replica.paxos.f_receive_commit(metadata, ballot)
       return True
@@ -63,23 +61,17 @@ class Paxos:
       self.ballot = ballot
       self.pending[ballot] = metadata
       return Status.LEARN
-    # print(f"  PAXOS: Node {self.id} has already seen ballot {ballot}, rejecting.")
     print(f"  PAXOS: Node {self.id} rejecting ballot {ballot}, self.ballot={self.ballot}")
-
     return Status.REJECT
   
 
   def f_receive_commit(self, metadata, ballot : int):
-
     self.store[metadata.key] = metadata
-    self.log.append(
-      {
-        "ballot": ballot,
-        "file_name": metadata.file_name,
-        "metadata": metadata._export()
-      }
-    )
-
+    self.log.append({
+      "ballot": ballot,
+      "file_name": metadata.file_name,
+      "metadata": metadata._export()
+    })
     if ballot in self.pending:
       del self.pending[ballot]
     print(f"  PAXOS: Node {self.id} committing ballot {ballot} for {metadata.file_name}.")
@@ -128,8 +120,11 @@ class ProxyNode:
     })
     if reply.get("status") == "error":
       return Status.REJECT
-    response = reply.get("status", "REJECT")
-    return Status[response]
+    response_str = reply.get("response", "REJECT")
+    try:
+      return Status[response_str]
+    except KeyError:
+      return Status.REJECT
   
   def f_receive_commit(self, metadata, ballot: int):
     self.send({
@@ -137,4 +132,3 @@ class ProxyNode:
       "metadata": metadata._export(),
       "ballot": ballot,
     })
-  

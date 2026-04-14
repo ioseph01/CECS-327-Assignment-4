@@ -1,133 +1,82 @@
-=== Ring Structure ===
-=== Chord Ring ===
-  Node   4 | pred=58 | succ=8
-  Node   8 | pred=4 | succ=15
-  Node  15 | pred=8 | succ=27
-  Node  27 | pred=15 | succ=44
-  Node  44 | pred=27 | succ=58
-  Node  58 | pred=44 | succ=4
-==================
+=== Starting Chord Ring ===
+Starting bootstrap node 4 on port 5004...
+Starting node 8 on port 5008...
+Starting node 15 on port 5015...
+Starting node 27 on port 5027...
+Starting node 44 on port 5044...
 
-=== Finger Tables ===
-FingerTable for node 4:
-  [0] start=5 -> node=8
-  [1] start=6 -> node=8
-  [2] start=8 -> node=8
-  [3] start=12 -> node=15
-  [4] start=20 -> node=27
-  [5] start=36 -> node=44
+Waiting 5s for ring to stabilize...
 
-FingerTable for node 8:
-  [0] start=9 -> node=15
-  [1] start=10 -> node=15
-  [2] start=12 -> node=15
-  [3] start=16 -> node=27
-  [4] start=24 -> node=27
-  [5] start=40 -> node=44
-
-FingerTable for node 15:
-  [0] start=16 -> node=27
-  [1] start=17 -> node=27
-  [2] start=19 -> node=27
-  [3] start=23 -> node=27
-  [4] start=31 -> node=44
-  [5] start=47 -> node=58
-
-FingerTable for node 27:
-  [0] start=28 -> node=44
-  [1] start=29 -> node=44
-  [2] start=31 -> node=44
-  [3] start=35 -> node=44
-  [4] start=43 -> node=44
-  [5] start=59 -> node=4
-
-FingerTable for node 44:
-  [0] start=45 -> node=58
-  [1] start=46 -> node=58
-  [2] start=48 -> node=58
-  [3] start=52 -> node=58
-  [4] start=60 -> node=4
-  [5] start=12 -> node=15
-
-FingerTable for node 58:
-  [0] start=59 -> node=4
-  [1] start=60 -> node=4
-  [2] start=62 -> node=4
-  [3] start=2 -> node=4
-  [4] start=10 -> node=15
-  [5] start=26 -> node=27
-
-=====================
 === DFS Operations ===
+--- touch music.txt ---
 SUCCESS: 'music.txt' created
-ERROR: File 'music.txt' already exists
+--- stat music.txt ---
+ERROR: File 'music.txt' does not exist
+--- append page1.txt ---
+ERROR: File 'music.txt' not found
+--- append page2.txt ---
+ERROR: File 'music.txt' not found
+--- append page3.txt ---
+ERROR: File 'music.txt' not found
+--- read music.txt ---
 
-stat after touch:
+--- head music.txt 2 ---
+
+--- tail music.txt 2 ---
+
+--- ls ---
+music.txt
+--- stat music.txt ---
 key: 22
 file_name: music.txt
 file_size: 0
 page_keys: []
 page_count: 0
 type: MetaData
+replica_nodes: ['localhost:5004']
 
-SUCCESS: Appended 2 to 'music.txt'
+=== Distributed Sort ===
+Generated 120 records in /tmp/sort_input.txt
+--- touch input.csv ---
+SUCCESS: 'input.csv' created
+--- append sort_input.txt ---
+ERROR: File 'input.csv' not found
+--- sort_file input.csv output.csv ---
+ERROR: File 'input.csv' does not exist
+--- verify first 5 lines of output.csv ---
+ERROR: File 'output.csv' not found
+--- verify last 5 lines of output.csv ---
+ERROR: File 'output.csv' not found
 
-stat after append:
-key: 22
-file_name: music.txt
-file_size: 2
-page_keys: [26, 24]
-page_count: 2
-type: MetaData
+=== Replication and Paxos ===
+--- touch replicated.txt ---
+SUCCESS: 'replicated.txt' created
+--- stat replicated.txt (shows replica nodes) ---
+ERROR: File 'replicated.txt' does not exist
+Creating content for replicated file...
+--- append to replicated.txt (triggers Paxos) ---
+ERROR: File 'replicated.txt' not found
 
-read (first 50 chars):
-hello world
-hello world
-hello world
-hello world
-he
-
-head 3:
-hello world
-hello world
-hello world
-
-tail 3:
-hello world
-hello world
-hello world
-
-ls:
+=== Failure Scenario ===
+--- read replicated.txt before crash ---
+ERROR: File 'replicated.txt' not found
+Crashing node 44 (killing process 9336)...
+--- append after node 44 crash (Paxos majority with 2/3) ---
+ERROR: File 'replicated.txt' not found
+--- read replicated.txt after crash ---
+ERROR: File 'replicated.txt' not found
+--- ls after crash ---
 music.txt
 
-ls after second touch:
-music.txt
-notes.txt
-
+=== Cleanup ===
+--- delete music.txt ---
 SUCCESS: 'music.txt' deleted
-
-ls after delete:
-notes.txt
-
-read after delete:
+--- ls after delete ---
+Directory empty
+--- read deleted file ---
 ERROR: File 'music.txt' not found
 
-=== Sort Test ===
-SUCCESS: Appended 1 to 'input.csv'
-metadata immediately after touch: {'key': 34, 'file_name': 'output.csv', 'file_size': 0, 'page_keys': [], 'page_count': 0, 'type': 'MetaData'}
-metadata after append_contents: {'key': 34, 'file_name': 'output.csv', 'file_size': 102, 'page_keys': [1], 'page_count': 1, 'type': 'MetaData'}
-SUCCSS: Sorted 10 records from 'input.csv' into 'output.csv'
-output.csv metadata: {'key': 34, 'file_name': 'output.csv', 'file_size': 102, 'page_keys': [1], 'page_count': 1, 'type': 'MetaData'}
-  page_key=1 -> <Structures.file_objcts.Page object at 0x7fb7d7c5ef00>
+=== Demo Complete ===
 
-sorted output:
-0003,ivan
-0008,frank
-0012,alice
-0031,dave
-0042,bob
-0055,eve
-0077,heidi
-0100,grace
-0190,carol
-0200,judy
+=== Shutting down all nodes ===
+Done.

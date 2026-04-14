@@ -28,20 +28,20 @@ def send_message(host, port: int, message: dict):
       sock.connect((host, port))
 
       data = json.dumps(message).encode("utf-8")
-      print(f"CLIENT: sending {data[:80]}")
+      # print(f"CLIENT: sending {data[:80]}")
       sock.sendall(data)
       sock.shutdown(socket.SHUT_WR)
 
       chunks = []
       while 1:
         chunk = sock.recv(BUFFER_SIZE)
-        print(f"CLIENT: got chunk {len(chunk)} bytes") 
+        # print(f"CLIENT: got chunk {len(chunk)} bytes") 
         if not chunk or chunk is None:
           break
         chunks.append(chunk)
 
       raw = b"".join(chunks)
-      print(f"CLIENT: raw reply {raw[:80]}") 
+      # print(f"CLIENT: raw reply {raw[:80]}") 
       return json.loads(raw.decode("utf-8"))
     
   except Exception as e:

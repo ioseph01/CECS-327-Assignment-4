@@ -14,7 +14,6 @@ class Server:
 
   def start(self):
     self.running = True
-
     thread = threading.Thread(target=self.listen, daemon=True)
     thread.start()
     print(f"SERVER: Node {self.node.id} listening on {self.host}:{self.port}")
@@ -47,10 +46,10 @@ class Server:
         chunks.append(chunk)
 
       raw = b"".join(chunks)
-      print(f"SERVER: received {raw[:80]}")
+      # print(f"SERVER: received {raw[:80]}")
       message = json.loads(raw.decode("utf-8"))
       reply = self.dispatch(message)
-      print(f"SERVER: replying {str(reply)[:80]}")
+      # print(f"SERVER: replying {str(reply)[:80]}")
       connection.sendall(json.dumps(reply).encode("utf-8"))
     except Exception as e:
       try:
@@ -64,9 +63,7 @@ class Server:
       connection.close()
 
 
-
   def dispatch(self, message: dict) -> dict:
- 
     msg_type = message.get("type")
 
     ### Chord ###
@@ -126,17 +123,22 @@ class Server:
     elif msg_type == "sort_collect":
         return self.node.handle_sort_collect(message)
 
-
     ### Paxos ###
     elif msg_type == "paxos_accept":
         return self.node.handle_paxos_accept(message)
 
     elif msg_type == "paxos_commit":
       return self.node.handle_paxos_commit(message)
-    
+
     elif msg_type == "get_ballot":
       return self.node.handle_get_ballot(message)
-    
+
+    elif msg_type == "paxos_propose":
+      return self.node.handle_paxos_propose(message)
+
+    elif msg_type == "ls_local":
+      return self.node.handle_ls_local(message)
+
     return {"status": "error", "reason": f"unknown message type: {msg_type}"}
 
 

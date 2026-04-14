@@ -5,6 +5,7 @@ from Structures.paxos import ProxyNode
 from config import PAGE_SIZE, R
 import bisect
 import uuid
+import time
 
 class DFS:
   def __init__(self, node):
@@ -13,7 +14,7 @@ class DFS:
 
   def get_replica_addresses(self, key: int):
     primary_address = self.node.find_succ(key)
-    return self._get_successive_addresses(primary_address, R)
+    return self.get_successive_addresses(primary_address, R) 
 
   def get_successive_addresses(self, start_address: str, count: int):
     addresses = []
@@ -21,7 +22,7 @@ class DFS:
     for _ in range(count):
       if current not in addresses:
         addresses.append(current)
-      reply = self.node._send(current, {
+      reply = self.node.send(current, {    
         "type": "get_succ"
       })
       if reply.get("status") == "error":
@@ -111,10 +112,6 @@ class DFS:
 
     self.put_metadata(metadata)
     return f"SUCCESS: appended {len(chunks)} page(s) to '{file_name}'"
-  
-  # def get_replicas(self, key):
-  #   primary = self.chord.find_succ(key)
-  #   return get_replica_nodes(self.chord, primary)
 
 
   """ Required DFS Operations """
@@ -202,20 +199,39 @@ class DFS:
   
 
   def ls(self):
-    ''' List all files in chord '''
-    files = []
-    seen = set()
-    for _, obj in self.node.store.items():
-      if isinstance(obj, dict) and obj.get("type") == "MetaData":
-        name = obj.get("file_name")
-        if name and name not in seen:
-          files.append(name)
-          seen.add(name)
-        elif hasattr(obj, "type") and obj.type == "MetaData":
-          if obj.file_name not in seen:
-            files.append(obj.file_name)
-            seen.add(obj.file_name)
+    ''' List all files across the entire Chord ring '''
+    files = set()
 
+    def collect_from_store(store):
+      for obj in store.values():
+        if isinstance(obj, dict) and obj.get("type") == "MetaData":
+          name = obj.get("file_name")
+          if name:
+            files.add(name)
+        elif hasattr(obj, "type") and obj.type == "MetaData":
+          files.add(obj.file_name)
+
+    # collect from local node
+    collect_from_store(self.node.store)
+
+    # walk ring and collect from each remote node
+    visited = set()
+    visited.add(self.node.address)
+    current = self.node.succ
+    while current and current not in visited:
+      visited.add(current)
+      reply = self.node.send(current, {"type": "ls_local"})
+      if reply.get("status") != "error":
+        for name in reply.get("files", []):
+          files.add(name)
+      # advance to next successor
+      reply2 = self.node.send(current, {"type": "get_succ"})
+      if reply2.get("status") == "error":
+        break
+      nxt = reply2.get("address")
+      if nxt is None or nxt == self.node.address:
+        break
+      current = nxt
 
     if not files:
       return "Directory empty"
@@ -240,7 +256,7 @@ class DFS:
     elif metadata.page_count == 0:
         return f"ERROR: File '{file_name}' is empty"
     
-    # Get pages and parse
+    # Parse all records from pages
     records = []
     for page_key in metadata.page_keys:
       page = self.get_page(page_key)
@@ -251,21 +267,23 @@ class DFS:
         if line:
           if "," not in line:
             return f"ERROR: invalid record format '{line}', expected key,value"
-          k,v = line.split(",", 1)
+          k, v = line.split(",", 1)
           records.append((k.strip(), v.strip()))
 
     if not records:
       return f"ERROR: no valid records found in '{file_name}'"
     
-    # Sort
+    # Route each record to the node responsible for hash(key)
     job_id = str(uuid.uuid4())
-    for k,v in records:
+    remote_targets = set()
+    for k, v in records:
       target_addr = self.node.find_succ(hash_key(k))
       if target_addr == self.node.address:
         if job_id not in self.node.sort_buffer:
           self.node.sort_buffer[job_id] = []
-        bisect.insort(self.node.sort_buffer[job_id], (k,v))
+        bisect.insort(self.node.sort_buffer[job_id], (k, v))
       else:
+        remote_targets.add(target_addr)
         self.node.send(target_addr, {
           "type": "sort_route",
           "job_id": job_id,
@@ -273,7 +291,10 @@ class DFS:
           "v": v,
         })
 
-    # Store
+    if remote_targets:
+      time.sleep(0.5)
+
+    # Collect sorted records from every node in ring
     sorted_records = []
     visited = set()
     current = self.node.address
@@ -290,9 +311,7 @@ class DFS:
         })
         records_here = reply.get("records", [])
       sorted_records.extend(records_here)
-      reply = self.node.send(current, {
-        "type" : "get_succ"
-      })
+      reply = self.node.send(current, {"type": "get_succ"})
       if reply.get("status") == "error":
         break
       next_address = reply.get("address")
@@ -302,10 +321,9 @@ class DFS:
 
     sorted_records.sort(key=lambda pair: pair[0])
 
-    # Output
-    contents = "\n".join(f"{k},{v}" for k,v in sorted_records)
+    # Write sorted output as new DFS file
+    contents = "\n".join(f"{k},{v}" for k, v in sorted_records)
     self.touch(output_filename)
     self.append_contents(output_filename, contents)
 
-    return f"SUCCSS: Sorted {len(sorted_records)} records from '{file_name}' into '{output_filename}'"
-        
+    return f"SUCCESS: Sorted {len(sorted_records)} records from '{file_name}' into '{output_filename}'" 

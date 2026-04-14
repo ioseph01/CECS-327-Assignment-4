@@ -102,12 +102,6 @@ class Node:
     self.alive = True
     self.dfs = None
 
-  def handle_get_ballot(self, message):
-    return {
-      "status": "ok",
-      "ballot": self.paxos.ballot,
-    }
-
   def parse_addr(self, address):
     host, port = address.split(":")
     return host, int(port)
@@ -330,6 +324,33 @@ class Node:
     job_id = message["job_id"]
     records = self.sort_buffer.pop(job_id, [])
     return {"status": "ok", "records": records}
+  
+  
+  def handle_paxos_propose(self, message: dict):
+    from Structures.file_objcts import MetaData
+    metadata = MetaData._import(message["metadata"])
+    replicas = self.dfs.get_replica_addresses(metadata.key)
+    replica_nodes = self.dfs.get_replica_node_objects(replicas)
+    success = self.paxos.l_propose(metadata, replica_nodes)
+    return {"status": "ok", "committed": success}
+
+  def handle_ls_local(self, message: dict):
+    files = []
+    for obj in self.store.values():
+      if isinstance(obj, dict) and obj.get("type") == "MetaData":
+        name = obj.get("file_name")
+        if name:
+          files.append(name)
+      elif hasattr(obj, "type") and obj.type == "MetaData":
+        files.append(obj.file_name)
+    return {"status": "ok", "files": files}
+
+  def handle_get_ballot(self, message):
+    return {
+      "status": "ok",
+      "ballot": self.paxos.ballot,
+    }
+
 
   def id_from_str(self, address: str) -> int:
     _, port = self.parse_address(address)
