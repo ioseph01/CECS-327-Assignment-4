@@ -14,31 +14,25 @@ class DFS:
 
   def get_replica_addresses(self, key: int):
     primary_address = self.node.find_succ(key)
+    # replicas = self.get_successive_addresses(primary_address, R)
+    # print(f"  REPLICA: key={key} primary={primary_address} replicas={replicas}")
+    # return replicas
     return self.get_successive_addresses(primary_address, R) 
 
   def get_successive_addresses(self, start_address: str, count: int):
-    addresses = []
+    addresses = [start_address]
     current = start_address
-    visited = set()
-
-    while len(addresses) < count:
-      if current in visited:
+    for _ in range(count - 1):
+      reply = self.node.send(current, {"type": "get_succ"})
+      # print(f"  WALK: current={current} reply={reply}")
+      if reply.get("status") == "error":
         break
-      visited.add(current)
-      addresses.append(current)
-
-      if current == self.node.address:
-        next_address = self.node.succ
-      else:
-        reply = self.node.send(current, {"type": "get_succ"})
-        if reply.get("status") == "error":
-          break
-        next_address = reply.get("address")
-
-      if next_address is None:
+      nxt = reply.get("address")
+      # print(f"  WALK: nxt={nxt} addresses={addresses}")
+      if nxt is None or nxt == start_address or nxt in addresses:
         break
-      current = next_address
-
+      addresses.append(nxt)
+      current = nxt
     return addresses
 
   def id_from_address(self, address: str):
@@ -105,7 +99,7 @@ class DFS:
     ''' Append string to file '''
     metadata = self.get_metadata(file_name)
     if metadata is None:
-      return f"ERROR: File '{file_name}' not found"
+      return f"ERROR: File '{file_name}' not found (append_contents)"
     chunks = [contents[i:i + PAGE_SIZE] for i in range(0, len(contents), PAGE_SIZE)]
     if not chunks:
       return f"ERROR: Nothing to append"
@@ -142,10 +136,12 @@ class DFS:
       with open(local_path, "r") as f:
         contents = f.read()
     except FileNotFoundError:
-      return f"ERROR: File '{local_path}' not found"
+      return f"ERROR: File '{local_path}' not found (append)"
   
     metadata = self.get_metadata(file_name)
     if metadata is None:
+      # Instead of self.touch(...), maybe need to send touch to sync with all files?
+      self.node.send()
       self.touch(file_name)
     return self.append_contents(file_name, contents)
   
@@ -154,7 +150,7 @@ class DFS:
     ''' Read and return file contents '''
     metadata = self.get_metadata(file_name)
     if metadata is None:
-      return f"ERROR: File '{file_name}' not found"
+      return f"ERROR: File '{file_name}' not found (read)"
     elif metadata.page_count == 0:
       return ""
     
@@ -190,7 +186,7 @@ class DFS:
     metadata = self.get_metadata(file_name)
 
     if metadata is None:
-      return f"ERROR: File '{file_name}' not found"
+      return f"ERROR: File '{file_name}' not found (delete)"
     
     for page_key in metadata.page_keys:
       self.node.delete(page_key)

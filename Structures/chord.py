@@ -136,44 +136,44 @@ class Node:
       return
     self.succ = reply["address"]
     print(f"Node {self.id} joined ring with successor {self.succ}")
+      
 
   def stabilize(self):
-    if self.succ is None or self.succ == self.address:
-      self.succ = self.address
-      return
-    print(f"[STAB] Node {self.id}: succ={self.succ}, pred={self.pred}")
-    reply = self.send(self.succ, {
-      "type": "get_pred"  
-    })
-    print(f"[STAB] Node {self.id}: get_pred reply={reply}")
+    # If pointing to self, try to find real successor via finger table
+    if self.succ == self.address:
+      addr = self.find_succ((self.id + 1) % (2 ** M))
+      if addr != self.address:
+        self.succ = addr
+      return  # still return, notify will happen next round
 
+    reply = self.send(self.succ, {"type": "get_pred"})
     if reply.get("status") == "error":
       self.succ = self.address
       return
     pred = reply.get("address")
-    if pred is not None:
+    if pred is not None and pred != self.address:
       pred_id = self.id_from_address(pred)
       succ_id = self.id_from_address(self.succ)
-      print(f"[STAB] Node {self.id}: pred={pred} pred_id={pred_id} succ_id={succ_id} in_range={self.in_range_open(pred_id, self.id, succ_id)}")
       if self.in_range_open(pred_id, self.id, succ_id):
-        print(f"[STAB] Node {self.id}: updating succ to {pred}")
         self.succ = pred
-    reply = self.send(self.succ, {
+    self.send(self.succ, {
       "type": "notify",
       "id": self.id,
       "address": self.address,
     })
-    print(f"[STAB] Node {self.id}: notify reply={reply}")
-
   def notify(self, sender_id, sender_addr):
-    if sender_addr == self.address or sender_addr is None:
-      return
-    if self.pred is None:
-      self.pred = sender_addr
-    else:
-      pred_id = self.id_from_address(self.pred)
-      if self.in_range_open(sender_id, pred_id, self.id):
-        self.pred = sender_addr
+      if sender_addr is None or sender_addr == self.address:
+          return
+      # Update predecessor
+      if self.pred is None:
+          self.pred = sender_addr
+      else:
+          pred_id = self.id_from_address(self.pred)
+          if self.in_range_open(sender_id, pred_id, self.id):
+              self.pred = sender_addr
+      # Bootstrap fix: if we still point to ourselves, any notifier is a better successor candidate
+      if self.succ == self.address or self.succ is None:
+          self.succ = sender_addr
 
   def fix_fingers(self):
     i = random.randint(0, M - 1)
@@ -184,7 +184,6 @@ class Node:
     id = self.id_from_address(addr)
     self.finger_table.entries[i].id = id
     self.finger_table.entries[i].address = addr
-
 
   def id_from_address(self, addr):
     _, port = addr.split(":")
@@ -202,6 +201,7 @@ class Node:
     return {"status": "ok", "address": address}
 
   def handle_get_succ(self, message: dict):
+    # print(f"  GET_SUCC: Node {self.id} returning succ={self.succ}")
     return {"status": "ok", "id": self.id, "self_id": self.id, "address": self.succ}
 
   def handle_get_pred(self, message: dict):
@@ -258,7 +258,7 @@ class Node:
     return {"status": "ok", "result": self.dfs.ls()}
 
   def handle_dfs_stat(self, message: dict):
-    print("Handle dfs stat.")
+    # print("Handle dfs stat.")
     return {"status": "ok", "result": self.dfs.stat(message["file_name"])}
 
   def handle_dfs_sort(self, message: dict):
