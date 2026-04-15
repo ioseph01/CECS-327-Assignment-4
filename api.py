@@ -195,7 +195,8 @@ class DFS:
     for page_key in metadata.page_keys:
       self.node.delete(page_key)
 
-    for addr in metadata.replica_nodes:
+    for node in metadata.replica_nodes:
+      addr = node.address
       if addr == self.node.address:
         self.node.store.pop(metadata.key, None)
       else:

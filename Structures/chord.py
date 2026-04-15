@@ -16,7 +16,7 @@ class Node:
     self.port = port
     self.address = f"{self.host}:{self.port}"
     self.pred = None
-    self.succ = self.address
+    self.succ = None
     self.store = {} # Page or MetaData obj
     self.finger_table = FingerTable(id)
     self.sort_buffer = {} # job id : (k,v)
@@ -34,6 +34,8 @@ class Node:
   
 
   def find_succ(self, key: int):
+    if self.succ is None or self.succ == self.address:
+      return self.address
     succ_id = self.get_succ_id()
     if self.in_range(key, self.id, succ_id):
       return self.succ
@@ -63,11 +65,22 @@ class Node:
         return entry.address
     return self.address
   
+
+  def in_range_open(self, key, lo, hi):
+    ''' For stabilizing '''
+    if lo == hi:
+      return False  # single node, nothing is strictly between
+    if lo < hi:
+      return lo < key < hi
+    return lo < key or key < hi
+  
+
   def in_range(self, key, lo, hi):
+    ''' For succsessor '''
     if lo < hi:
       return lo < key <= hi
     elif lo == hi:
-      return lo == key
+      return True
     return lo < key or key <= hi
 
 
@@ -119,45 +132,63 @@ class Node:
     if reply.get("status") == "error":
       print(f"Node failed to join via {addr}")
       return
+    if reply["address"] is None:
+      return
     self.succ = reply["address"]
     print(f"Node {self.id} joined ring with successor {self.succ}")
 
   def stabilize(self):
+    if self.succ is None or self.succ == self.address:
+      self.succ = self.address
+      return
+    print(f"[STAB] Node {self.id}: succ={self.succ}, pred={self.pred}")
     reply = self.send(self.succ, {
       "type": "get_pred"  
     })
+    print(f"[STAB] Node {self.id}: get_pred reply={reply}")
+
     if reply.get("status") == "error":
+      self.succ = self.address
       return
     pred = reply.get("address")
     if pred is not None:
       pred_id = self.id_from_address(pred)
       succ_id = self.id_from_address(self.succ)
-      if self.in_range(pred_id, self.id, succ_id):
+      print(f"[STAB] Node {self.id}: pred={pred} pred_id={pred_id} succ_id={succ_id} in_range={self.in_range_open(pred_id, self.id, succ_id)}")
+      if self.in_range_open(pred_id, self.id, succ_id):
+        print(f"[STAB] Node {self.id}: updating succ to {pred}")
         self.succ = pred
-    self.send(self.succ, {
+    reply = self.send(self.succ, {
       "type": "notify",
       "id": self.id,
       "address": self.address,
     })
+    print(f"[STAB] Node {self.id}: notify reply={reply}")
 
   def notify(self, sender_id, sender_addr):
+    if sender_addr == self.address or sender_addr is None:
+      return
     if self.pred is None:
       self.pred = sender_addr
     else:
       pred_id = self.id_from_address(self.pred)
-      if self.in_range(sender_id, pred_id, self.id):
+      if self.in_range_open(sender_id, pred_id, self.id):
         self.pred = sender_addr
 
   def fix_fingers(self):
     i = random.randint(0, M - 1)
     start = self.finger_table.entries[i].start
     addr = self.find_succ(start)
+    if addr is None:
+      return
     id = self.id_from_address(addr)
     self.finger_table.entries[i].id = id
     self.finger_table.entries[i].address = addr
 
 
   def id_from_address(self, addr):
+    _, port = addr.split(":")
+    return int(port) - 5000
     reply = self.send(addr, {
       "type": "get_succ"
     })
