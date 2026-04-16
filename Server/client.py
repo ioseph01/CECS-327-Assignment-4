@@ -45,4 +45,5 @@ def send_message(host, port: int, message: dict):
       return json.loads(raw.decode("utf-8"))
     
   except Exception as e:
+    # print("Client exception", str(e))
     return {"status": "error", "reason": str(e)}

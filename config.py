@@ -1,8 +1,8 @@
-M = 6 # Ring size 2^m = 2^6 = 64
+M = 10 # Ring size 2^M = 2^10 = 1024
 PAGE_SIZE = 1024 # characters per page
 R = 3
 
-SOCKET_TIMEOUT = 5
+SOCKET_TIMEOUT = 20
 BUFFER_SIZE = 4096
 HOST = "localhost"
 STABILIZE_INTERVAL = 2

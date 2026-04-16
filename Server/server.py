@@ -53,6 +53,7 @@ class Server:
       connection.sendall(json.dumps(reply).encode("utf-8"))
     except Exception as e:
       try:
+          # print("Server exception", str(e))
           connection.sendall(json.dumps({
             "status": "error",
             "reason": str(e),
@@ -118,6 +119,9 @@ class Server:
       return self.node.handle_dfs_sort(message)
 
     ### Sort ###
+    elif msg_type == "sort_route_batch":
+      return self.node.handle_sort_route_batch(message)
+  
     elif msg_type == "sort_route":
         return self.node.handle_sort_route(message)
 

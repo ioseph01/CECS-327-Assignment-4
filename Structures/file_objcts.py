@@ -31,7 +31,7 @@ class Page:
   def _import(cls, data: dict) -> "Page":
     return cls(
         key=data["key"],
-        contents=data["contents"],
+        contents=data.get("contents", ""),
         page_number=data["page_number"],
     )
 

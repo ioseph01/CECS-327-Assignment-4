@@ -25,10 +25,14 @@ class Node:
     self.dfs = None
 
   def parse_addr(self, address):
+    if address is None:
+      return None
     host, port = address.split(":")
     return host, int(port)
   
   def send(self, address, msg):
+    if address is None:
+      return {"status": "error", "result": "In chord send(), addess is None"}
     host, port = self.parse_addr(address)
     return send_message(host, port, msg)
   
@@ -86,15 +90,16 @@ class Node:
 
   def put(self, key: int, value):
     address = self.find_succ(key)
+    exported = value if isinstance(value, dict) else value._export()
     if address == self.address:
-      self.store[key] = value
+      self.store[key] = exported
       return {
         "status": "ok"
       }
     return self.send(address, {
       "type": "put",
       "key": key,
-      "value": value if isinstance(value, dict) else value._export()
+      "value": exported
     })
 
 
@@ -108,6 +113,13 @@ class Node:
     })
     if reply.get("status") == "error" or reply.get("status") is None:
       return None
+    if reply["value"]["type"] != "Page":
+      # reply = self.send(address, {
+      #   "type": "get",
+      #   "key": int(reply["value"]["page_keys"][0]),
+      # })
+      pass
+
     return reply["value"]
   
 
@@ -188,12 +200,6 @@ class Node:
   def id_from_address(self, addr):
     _, port = addr.split(":")
     return int(port) - 5000
-    reply = self.send(addr, {
-      "type": "get_succ"
-    })
-    if reply.get("status") == "error":
-      return 0
-    return reply.get("self_id", 0)
 
 
   def handle_find_succ(self, message: dict):
@@ -217,6 +223,8 @@ class Node:
 
   def handle_get(self, message: dict):
     value = self.store.get(message["key"], None)
+    if hasattr(value, "_export"):
+        value = value._export()
     return {"status": "ok", "value": value}
 
   def handle_delete(self, message: dict):
@@ -263,6 +271,15 @@ class Node:
 
   def handle_dfs_sort(self, message: dict):
     return {"status": "ok", "result": self.dfs.sort_file(message["file_name"], message["output"])}
+  
+  def handle_sort_route_batch(self, message: dict):
+    job_id = message["job_id"]
+    records = message["records"]
+    if job_id not in self.sort_buffer:
+      self.sort_buffer[job_id] = []
+    for k, v in records:
+      bisect.insort(self.sort_buffer[job_id], (k, v))
+    return {"status": "ok"}
 
   def handle_sort_route(self, message: dict):
     job_id = message["job_id"]

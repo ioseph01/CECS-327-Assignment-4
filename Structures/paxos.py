@@ -69,7 +69,7 @@ class Paxos:
   
 
   def f_receive_commit(self, metadata, ballot : int):
-    self.store[metadata.key] = metadata
+    self.store[metadata.key] = metadata._export()
     self.log.append({
       "ballot": ballot,
       "file_name": metadata.file_name,
@@ -113,6 +113,7 @@ class ProxyNode:
     return self.node.send(self.address, message)
   
   def l_propose(self):
+    print("ProxyNode called to lead proposal but not implemented :/")
     pass
 
   def f_receive_accept(self, metadata, ballot: int):
@@ -121,7 +122,7 @@ class ProxyNode:
       "metadata": metadata._export(),
       "ballot": ballot,
     })
-    print(f"PAXOS Reply: {reply}")
+    print(f"  PAXOS Reply: {reply}")
     if reply.get("status") == "error":
       return Status.REJECT
     response_str = reply.get("response", "REJECT")

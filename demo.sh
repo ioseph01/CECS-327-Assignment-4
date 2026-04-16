@@ -8,7 +8,7 @@ PYTHON=python3
 CLI="$PYTHON cli.py"
 BOOTSTRAP_PORT=5004
 SLEEP_JOIN=2        # seconds to wait after each node joins
-SLEEP_STAB=5        # seconds to let stabilization settle
+SLEEP_STAB=15        # seconds to let stabilization settle
 SLEEP_CMD=1         # seconds between commands
 
 # ------------------------------------------------------------------ #
@@ -59,6 +59,15 @@ echo ""
 echo "Waiting ${SLEEP_STAB}s for ring to stabilize..."
 sleep $SLEEP_STAB
 
+$CLI --port 5004 stat music.txt   # just to trigger something
+# then check successor chain manually:
+for port in 5004 5008 5015 5027 5044; do
+    echo -n " "
+    python3 -c "from Server.client import send_message; r = send_message('localhost', $port, {'type':'get_pred'}); print(r['address'] + '-> ', end='')"
+    python3 -c "print($port, end='')"
+    python3 -c "from Server.client import send_message; r = send_message('localhost', $port, {'type':'get_succ'}); print('->' + r['address'])"
+done
+
 # ------------------------------------------------------------------ #
 #  Step 2 — DFS operations                                             #
 # ------------------------------------------------------------------ #
@@ -70,25 +79,29 @@ echo "--- touch music.txt ---"
 $CLI --port 5004 touch music.txt
 sleep $SLEEP_CMD
 
+echo "--- touch test.txt ---"
+$CLI --port 5004 touch test.txt
+sleep $SLEEP_CMD
+
 echo "--- stat music.txt ---"
 $CLI --port 5004 stat music.txt
 sleep $SLEEP_CMD
 
 # create local files to append
-echo "hello world" > /tmp/page1.txt
-echo "distributed file systems" > /tmp/page2.txt
-echo "chord ring routing" > /tmp/page3.txt
+echo "hello world" > tmp/page1.txt
+echo "distributed file systems" > tmp/page2.txt
+echo "chord ring routing" > tmp/page3.txt
 
 echo "--- append page1.txt ---"
-$CLI --port 5004 append music.txt /tmp/page1.txt
+$CLI --port 5004 append music.txt tmp/page1.txt
 sleep $SLEEP_CMD
 
 echo "--- append page2.txt ---"
-$CLI --port 5008 append music.txt /tmp/page2.txt
+$CLI --port 5008 append music.txt tmp/page2.txt
 sleep $SLEEP_CMD
 
 echo "--- append page3.txt ---"
-$CLI --port 5015 append music.txt /tmp/page3.txt
+$CLI --port 5015 append music.txt tmp/page3.txt
 sleep $SLEEP_CMD
 
 echo "--- read music.txt ---"
@@ -111,6 +124,38 @@ echo "--- stat music.txt ---"
 $CLI --port 5004 stat music.txt
 sleep $SLEEP_CMD
 
+
+# ------------------------------------------------------------------ #
+#  Step 4 — Replication + Paxos                                        #
+# ------------------------------------------------------------------ #
+
+echo ""
+echo "=== Replication and Paxos ==="
+
+echo "--- ls ---"
+$CLI --port 5004 ls
+sleep $SLEEP_CMD
+
+echo "--- touch replicated.txt ---"
+$CLI --port 5004 touch replicated.txt
+sleep $SLEEP_CMD
+
+echo "--- ls ---"
+$CLI --port 5004 ls
+sleep $SLEEP_CMD
+
+echo "--- stat replicated.txt (shows replica nodes) ---"
+$CLI --port 5004 stat replicated.txt
+sleep $SLEEP_CMD
+
+echo "Creating content for replicated file..."
+echo "replicated content line" > tmp/rep_input.txt
+
+echo "--- append to replicated.txt (triggers Paxos) ---"
+$CLI --port 5004 append replicated.txt tmp/rep_input.txt
+sleep $SLEEP_CMD
+
+
 # ------------------------------------------------------------------ #
 #  Step 3 — Distributed Sort                                           #
 # ------------------------------------------------------------------ #
@@ -121,11 +166,11 @@ echo "=== Distributed Sort ==="
 # create input file with 100+ records
 python3 -c "
 import random
-records = [(f'{random.randint(0,9999):04d}', f'value{i}') for i in range(120)]
-with open('/tmp/sort_input.txt', 'w') as f:
+records = [(f'{random.randint(0,9999):04d}', f'value{i}') for i in range(50)]
+with open('tmp/sort_input.txt', 'w') as f:
     for k,v in records:
         f.write(f'{k},{v}\n')
-print('Generated 120 records in /tmp/sort_input.txt')
+print('Generated 50 records in tmp/sort_input.txt')
 "
 
 echo "--- touch input.csv ---"
@@ -133,7 +178,7 @@ $CLI --port 5004 touch input.csv
 sleep $SLEEP_CMD
 
 echo "--- append sort_input.txt ---"
-$CLI --port 5004 append input.csv /tmp/sort_input.txt
+$CLI --port 5004 append input.csv tmp/sort_input.txt
 sleep $SLEEP_CMD
 
 echo "--- sort_file input.csv output.csv ---"
@@ -148,27 +193,6 @@ echo "--- verify last 5 lines of output.csv ---"
 $CLI --port 5004 tail output.csv 5
 sleep $SLEEP_CMD
 
-# ------------------------------------------------------------------ #
-#  Step 4 — Replication + Paxos                                        #
-# ------------------------------------------------------------------ #
-
-echo ""
-echo "=== Replication and Paxos ==="
-
-echo "--- touch replicated.txt ---"
-$CLI --port 5004 touch replicated.txt
-sleep $SLEEP_CMD
-
-echo "--- stat replicated.txt (shows replica nodes) ---"
-$CLI --port 5004 stat replicated.txt
-sleep $SLEEP_CMD
-
-echo "Creating content for replicated file..."
-echo "replicated content line" > /tmp/rep_input.txt
-
-echo "--- append to replicated.txt (triggers Paxos) ---"
-$CLI --port 5004 append replicated.txt /tmp/rep_input.txt
-sleep $SLEEP_CMD
 
 # ------------------------------------------------------------------ #
 #  Step 5 — Failure Scenario                                           #
@@ -187,8 +211,8 @@ NODE5_PID=""
 sleep $SLEEP_CMD
 
 echo "--- append after node 44 crash (Paxos majority with 2/3) ---"
-echo "after crash content" > /tmp/after_crash.txt
-$CLI --port 5004 append replicated.txt /tmp/after_crash.txt
+echo "after crash content" > tmp/after_crash.txt
+$CLI --port 5004 append replicated.txt tmp/after_crash.txt
 sleep $SLEEP_CMD
 
 echo "--- read replicated.txt after crash ---"
@@ -216,6 +240,14 @@ sleep $SLEEP_CMD
 
 echo "--- read deleted file ---"
 $CLI --port 5004 read music.txt
+sleep $SLEEP_CMD
+
+echo "--- delete input.csv ---"
+$CLI --port 5004 delete input.csv
+sleep $SLEEP_CMD
+
+echo "--- read deleted file ---"
+$CLI --port 5004 delete input.csv
 sleep $SLEEP_CMD
 
 echo ""

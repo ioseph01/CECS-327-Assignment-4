@@ -55,13 +55,14 @@ class DFS:
     for addr in replicas:
       if addr == self.node.address:
         obj = self.node.store.get(key, None)
+        # print(f"  META: local store lookup key={key} found={obj is not None}")
       else:
         reply = self.node.send(addr, {
           "type": "get",
           "key": key
         })
         obj = reply.get("value", None)
-
+        # print(f"  META: remote lookup addr={addr} found={obj is not None} reply={str(reply)[:80]}")
       if obj is None:
         continue
       elif isinstance(obj, dict):
@@ -100,21 +101,39 @@ class DFS:
     metadata = self.get_metadata(file_name)
     if metadata is None:
       return f"ERROR: File '{file_name}' not found (append_contents)"
-    chunks = [contents[i:i + PAGE_SIZE] for i in range(0, len(contents), PAGE_SIZE)]
+    
+    lines = contents.splitlines()
+    chunks = []
+    current_chunk = []
+    current_size = 0
+
+    for line in lines:
+      line_size = len(line) + 1  # +1 for newline
+      if current_size + line_size > PAGE_SIZE and current_chunk:
+          chunks.append("\n".join(current_chunk) + "\n")
+          current_chunk = [line]
+          current_size = line_size
+      else:
+        current_chunk.append(line)
+        current_size += line_size
+
+    if current_chunk:
+      chunks.append("\n".join(current_chunk) + "\n")
+
     if not chunks:
       return f"ERROR: Nothing to append"
-    
+
     for chunk in chunks:
-        page_number = metadata.page_count
-        page_key = self.page_key(file_name, page_number)
-        page = Page(page_key, chunk, page_number)
-        self.node.put(page_key, page)
-        metadata.page_keys.append(page_key)
-        metadata.file_size += len(chunk)
+      page_number = metadata.page_count
+      page_key = self.page_key(file_name, page_number)
+      page = Page(page_key, chunk, page_number)
+      self.node.put(page_key, page)
+      metadata.page_keys.append(page_key)
+      metadata.file_size += len(chunk)
 
     self.put_metadata(metadata)
     return f"SUCCESS: appended {len(chunks)} page(s) to '{file_name}'"
-
+  
 
   """ Required DFS Operations """
 
@@ -130,21 +149,26 @@ class DFS:
     return f"SUCCESS: '{file_name}' created"
   
 
-  def append(self, file_name : str, local_path : str):
+  def append(self, file_name: str, local_path: str):
     ''' Read a local file and append contents '''
     try:
       with open(local_path, "r") as f:
-        contents = f.read()
+          contents = f.read()
     except FileNotFoundError:
-      return f"ERROR: File '{local_path}' not found (append)"
-  
+      return f"ERROR: File '{local_path}' not found"
+
     metadata = self.get_metadata(file_name)
     if metadata is None:
-      # Instead of self.touch(...), maybe need to send touch to sync with all files?
-      self.node.send()
-      self.touch(file_name)
+      result = self.touch(file_name)
+      if result.startswith("ERROR"):
+        print("Error with touch (append)")
+        return result
+        # fetch the freshly created metadata rather than re-entering append_contents
+      metadata = self.get_metadata(file_name)
+      if metadata is None:
+        return f"ERROR: Failed to create '{file_name}'"
     return self.append_contents(file_name, contents)
-  
+
 
   def read(self, file_name: str):
     ''' Read and return file contents '''
@@ -263,8 +287,21 @@ class DFS:
     # Parse all records from pages
     records = []
     for page_key in metadata.page_keys:
+      print(f"  SORT: page_key={page_key} type={type(page_key)}")
+      addr = self.node.find_succ(page_key)
+      print(f"  SORT: routed to {addr}")
+      # check what's actually stored there
+      if addr == self.node.address:
+        raw = self.node.store.get(page_key, None)
+        print(f"  SORT: local raw={str(raw)[:80]}")
+      else:
+        reply = self.node.send(addr, {"type": "get", "key": page_key})
+        print(f"  SORT: remote raw={str(reply)[:80]}")
       page = self.get_page(page_key)
+      print(f"  SORT: page={page}")
       if page is None:
+        addr = self.node.find_succ(page_key)
+        print(f"  SORT: page_key={page_key} should be at {addr}")
         return f"ERROR: Page missing in file '{file_name}'"
       for line in page.contents.splitlines():
         line = line.strip()
@@ -279,25 +316,28 @@ class DFS:
     
     # Route each record to the node responsible for hash(key)
     job_id = str(uuid.uuid4())
-    remote_targets = set()
+
+    # batch records by target node first
+    batches = {}  # address -> list of (k, v)
     for k, v in records:
-      target_addr = self.node.find_succ(hash_key(k))
-      if target_addr == self.node.address:
+      target_address = self.node.find_succ(hash_key(k))
+      if target_address not in batches:
+        batches[target_address] = []
+      batches[target_address].append((k, v))
+
+    # send one message per node instead of one per record
+    for address, batch in batches.items():
+      if address == self.node.address:
         if job_id not in self.node.sort_buffer:
           self.node.sort_buffer[job_id] = []
-        bisect.insort(self.node.sort_buffer[job_id], (k, v))
+        for k, v in batch:
+          bisect.insort(self.node.sort_buffer[job_id], (k, v))
       else:
-        remote_targets.add(target_addr)
-        self.node.send(target_addr, {
-          "type": "sort_route",
+        self.node.send(address, {
+          "type": "sort_route_batch",
           "job_id": job_id,
-          "k": k,
-          "v": v,
+          "records": batch,
         })
-
-    if remote_targets:
-      time.sleep(0.5)
-
     # Collect sorted records from every node in ring
     sorted_records = []
     visited = set()
@@ -314,20 +354,37 @@ class DFS:
           "job_id": job_id,
         })
         records_here = reply.get("records", [])
+
       sorted_records.extend(records_here)
-      reply = self.node.send(current, {"type": "get_succ"})
-      if reply.get("status") == "error":
-        break
-      next_address = reply.get("address")
-      if next_address is None:
+      if current == self.node.address:
+        next_address = self.node.succ
+      else:
+        reply = self.node.send(current, {"type": "get_succ"})
+        if reply.get("status") == "error":
+          break
+        next_address = reply.get("address")
+      if next_address is None or next_address == self.node.address:
         break
       current = next_address
 
+    existing = self.get_metadata(output_filename)
+    if existing is not None:
+      return f"ERROR: Output file '{output_filename}' already exists"
+
     sorted_records.sort(key=lambda pair: pair[0])
-
-    # Write sorted output as new DFS file
+    sorted_records = [(r[0], r[1]) for r in sorted_records]
     contents = "\n".join(f"{k},{v}" for k, v in sorted_records)
-    self.touch(output_filename)
-    self.append_contents(output_filename, contents)
+    
+    key = self.metadata_key(output_filename)
+    metadata_out = MetaData(key, output_filename, [], 0)
 
-    return f"SUCCESS: Sorted {len(sorted_records)} records from '{file_name}' into '{output_filename}'" 
+    chunks = [contents[i:i + PAGE_SIZE] for i in range(0, len(contents), PAGE_SIZE)]
+    for i, chunk in enumerate(chunks):
+      page_key = self.page_key(output_filename, i)
+      page = Page(page_key, chunk, i)
+      self.node.put(page_key, page)
+      metadata_out.page_keys.append(page_key)
+      metadata_out.file_size += len(chunk)
+
+    self.put_metadata(metadata_out)
+    return f"SUCCESS: Sorted {len(sorted_records)} records from '{file_name}' into '{output_filename}'"
