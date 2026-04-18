@@ -166,11 +166,11 @@ echo "=== Distributed Sort ==="
 # create input file with 100+ records
 python3 -c "
 import random
-records = [(f'{random.randint(0,9999):04d}', f'value{i}') for i in range(50)]
+records = [(f'{random.randint(0,9999):04d}', f'value{i}') for i in range(100)]
 with open('tmp/sort_input.txt', 'w') as f:
     for k,v in records:
         f.write(f'{k},{v}\n')
-print('Generated 50 records in tmp/sort_input.txt')
+print('Generated 100 records in tmp/sort_input.txt')
 "
 
 echo "--- touch input.csv ---"

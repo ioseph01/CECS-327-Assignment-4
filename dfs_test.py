@@ -1,187 +1,263 @@
-# test_chord_dfs.py
-from Structures.chord import Chord, Node
-from api import DFS
+# dfs_test.py
+import time
+import subprocess
+import sys
+import os
+import signal
+from Server.client import send_message
 
+HOST = "localhost"
+PORTS = [5004, 5008, 5015, 5027, 5044]
+NODE_IDS = [4, 8, 15, 27, 44]
+BOOTSTRAP_PORT = 5004
+PROCESSES = []
 
-def test_paxos(chord, dfs):
-    print("\n=== Paxos Test ===")
+# ------------------------------------------------------------------ #
+#  node management                                                     #
+# ------------------------------------------------------------------ #
 
-    print(dfs.touch("paxos_test.txt"))
+def start_nodes():
+    print("=== Starting Chord Ring ===")
 
-    with open("paxos_input.txt", "w") as f:
-        f.write("paxos line\n" * 20)
+    # start bootstrap node
+    p = subprocess.Popen(
+        [sys.executable, "main.py", "--id", "4", "--port", "5004"],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+    )
+    PROCESSES.append(p)
+    print(f"Started bootstrap node 4 on port 5004 (pid={p.pid})")
+    time.sleep(2)
 
-    print(dfs.append("paxos_test.txt", "paxos_input.txt"))
+    # start remaining nodes
+    for node_id, port in zip(NODE_IDS[1:], PORTS[1:]):
+        p = subprocess.Popen(
+            [sys.executable, "main.py",
+             "--id", str(node_id),
+             "--port", str(port),
+             "--bootstrap", f"localhost:{BOOTSTRAP_PORT}"],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+        )
+        PROCESSES.append(p)
+        print(f"Started node {node_id} on port {port} (pid={p.pid})")
+        time.sleep(2)
 
-    meta = dfs.get_metadata("paxos_test.txt")
-    print(f"\nreplica nodes: {meta.replica_nodes}")
-    for node_id in meta.replica_nodes:
-        chord.nodes[node_id].paxos.print_log()
+    print("\nWaiting 10s for ring to stabilize...")
+    time.sleep(10)
+    print("Ring ready.\n")
 
-    # simulate proper follower crash
-    crashed_id = meta.replica_nodes[2]
-    crashed_node = chord.nodes[crashed_id]
-    crashed_node.alive = False
-    print(f"\nsimulating crash of follower node {crashed_id}")
-    print(f"node {crashed_id} is now crashed — will not respond to any messages")
+def stop_nodes():
+    print("\n=== Shutting down nodes ===")
+    for p in PROCESSES:
+        try:
+            p.terminate()
+            p.wait(timeout=3)
+        except Exception:
+            p.kill()
+    print("Done.")
 
-    # append again — should still reach majority with 2/3
-    with open("paxos_input2.txt", "w") as f:
-        f.write("after crash line\n" * 20)
+# ------------------------------------------------------------------ #
+#  helpers                                                             #
+# ------------------------------------------------------------------ #
 
-    print(dfs.append("paxos_test.txt", "paxos_input2.txt"))
+def send(port, message):
+    return send_message(HOST, port, message)
 
-    print("\nread after follower crash:")
-    print(dfs.read("paxos_test.txt")[:80])
+def dfs(port, command, **kwargs):
+    msg = {"type": f"dfs_{command}", **kwargs}
+    reply = send(port, msg)
+    return reply.get("result", reply)
 
-    for node_id in meta.replica_nodes:
-        chord.nodes[node_id].paxos.print_log()
+def separator(title):
+    print(f"\n{'='*10} {title} {'='*10}")
 
+def check(label, result, expected=None):
+    if expected is not None:
+        passed = expected in str(result)
+        status = "PASS" if passed else "FAIL"
+        print(f"  [{status}] {label}")
+        if not passed:
+            print(f"         expected: {expected}")
+            print(f"         got:      {result}")
+    else:
+        print(f"  [INFO] {label}: {result}")
 
-def test_replication(chord, dfs):
-    print("\n=== Replication Test ===")
+# ------------------------------------------------------------------ #
+#  tests                                                               #
+# ------------------------------------------------------------------ #
 
-    dfs.touch("replicated.txt")
+def test_chord():
+    separator("Chord Connectivity")
+    for node_id, port in zip(NODE_IDS, PORTS):
+        reply = send(port, {"type": "get_succ"})
+        check(f"node {node_id} on port {port} reachable", reply, "ok")
+        print(f"         succ={reply.get('address')} self_id={reply.get('self_id')}")
 
-    with open("rep_input.txt", "w") as f:
-        f.write("this is a replicated file\n" * 10)
+def test_touch():
+    separator("touch")
+    result = dfs(5004, "touch", file_name="test.txt")
+    check("touch new file", result, "SUCCESS")
 
-    print(dfs.append("replicated.txt", "rep_input.txt"))
-    print(dfs.stat("replicated.txt"))
+    result = dfs(5004, "touch", file_name="test.txt")
+    check("touch duplicate rejected", result, "ERROR")
 
-    # show which nodes hold the metadata
-    print("\nreplica node ids:")
-    meta = dfs.get_metadata("replicated.txt")
-    print(meta.replica_nodes)
+def test_stat():
+    separator("stat")
+    result = dfs(5004, "stat", file_name="test.txt")
+    check("stat existing file", result, "test.txt")
+    check("stat shows replica_nodes", result, "replica_nodes")
 
-    # show that all 3 replica nodes actually have it in their store
-    print("\nverifying replicas in store:")
-    for node_id in meta.replica_nodes:
-        node = chord.nodes[node_id]
-        has_it = meta.key in node.store
-        print(f"  node {node_id}: {'YES' if has_it else 'NO'}")
+    result = dfs(5004, "stat", file_name="nonexistent.txt")
+    check("stat missing file returns error", result, "ERROR")
 
-    # simulate primary node failure — remove metadata from primary
-    primary_id = meta.replica_nodes[0]
-    primary_node = chord.nodes[primary_id]
-    del primary_node.store[meta.key]
-    print(f"\nsimulated crash of primary node {primary_id}")
+def test_append_and_read():
+    separator("append and read")
 
-    # read should still work via replicas
-    print("read after primary crash:")
-    print(dfs.read("replicated.txt")[:50])
+    with open("tmp/a1.txt", "w") as f:
+        f.write("line one\nline two\nline three\n")
+    with open("tmp/a2.txt", "w") as f:
+        f.write("line four\nline five\nline six\n")
+    with open("tmp/a3.txt", "w") as f:
+        f.write("line seven\nline eight\nline nine\n")
 
+    result = dfs(5004, "append", file_name="test.txt", local_path="tmp/a1.txt")
+    check("append page 1", result, "SUCCESS")
 
-def test_sort(dfs):
-    print("\n=== Sort Test ===")
+    result = dfs(5008, "append", file_name="test.txt", local_path="tmp/a2.txt")
+    check("append page 2 via different node", result, "SUCCESS")
 
-    # create a DFS file with 10 key,value records out of order
-    records = [
-        "0042,bob",
-        "0012,alice",
-        "0190,carol",
-        "0031,dave",
-        "0055,eve",
-        "0008,frank",
-        "0100,grace",
-        "0077,heidi",
-        "0003,ivan",
-        "0200,judy",
-    ]
+    result = dfs(5015, "append", file_name="test.txt", local_path="tmp/a3.txt")
+    check("append page 3 via different node", result, "SUCCESS")
 
-    # write records to a local file and append into DFS
-    with open("sort_input.txt", "w") as f:
-        f.write("\n".join(records))
+    result = dfs(5004, "read", file_name="test.txt")
+    check("read returns all content", result, "line one")
+    check("read contains page 2", result, "line four")
+    check("read contains page 3", result, "line seven")
 
-    dfs.touch("input.csv")
-    print(dfs.append("input.csv", "sort_input.txt"))
+def test_head_tail():
+    separator("head and tail")
+    result = dfs(5004, "head", file_name="test.txt", n=2)
+    check("head 2 lines", result, "line one")
 
-    # sort
-    print(dfs.sort_file("input.csv", "output.csv"))
+    result = dfs(5004, "tail", file_name="test.txt", n=2)
+    check("tail 2 lines", result, "line nine")
 
-    # debug
-    meta = dfs.get_metadata("output.csv")
-    print(f"output.csv metadata: {meta._export() if meta else None}")
+def test_ls():
+    separator("ls")
+    dfs(5004, "touch", file_name="file_a.txt")
+    dfs(5004, "touch", file_name="file_b.txt")
 
-    for pk in (meta.page_keys if meta else []):
-        page = dfs.get_page(pk)
-        print(f"  page_key={pk} -> {page}")
+    result = dfs(5004, "ls")
+    check("ls shows test.txt", result, "test.txt")
 
-    # verify
-    print("\nsorted output:")
-    print(dfs.read("output.csv"))
+def test_delete():
+    separator("delete")
+    result = dfs(5004, "delete", file_name="test.txt")
+    check("delete existing file", result, "SUCCESS")
 
+    result = dfs(5004, "read", file_name="test.txt")
+    check("read after delete returns error", result, "ERROR")
 
+    result = dfs(5004, "delete", file_name="nonexistent.txt")
+    check("delete missing file returns error", result, "ERROR")
 
-def make_ring():
-    chord = Chord()
-    for node_id in [4, 8, 15, 27, 44, 58]:
-        node = Node(chord, node_id)
-        chord.add_node(node)
-    return chord
+def test_sort():
+    separator("distributed sort")
 
-def test_ring(chord):
-    print("=== Ring Structure ===")
-    chord.print_ring()
-    print()
-    chord.print_finger_tables()
+    import random
+    with open("tmp/sort_in.txt", "w") as f:
+        keys = [f"{random.randint(0, 9999):04d}" for _ in range(50)]
+        for i, k in enumerate(keys):
+            f.write(f"{k},value{i}\n")
 
-def test_dfs(dfs):
-    print("=== DFS Operations ===")
+    dfs(5004, "touch", file_name="sort_input.txt")
+    result = dfs(5004, "append", file_name="sort_input.txt", local_path="tmp/sort_in.txt")
+    check("append sort input", result, "SUCCESS")
 
-    # touch
-    print(dfs.touch("music.txt"))
-    print(dfs.touch("music.txt"))  # should say already exists
+    result = dfs(5004, "sort", file_name="sort_input.txt", output="sort_output.txt")
+    print(f"RESULT: {result}")
+    check("sort_file completes", result, "SUCCESS")
 
-    # stat on empty file
-    print("\nstat after touch:")
-    print(dfs.stat("music.txt"))
+    result = dfs(5004, "read", file_name="sort_output.txt")
+    check("sorted output exists", result, ",value")
 
-    # create a small local file to append
-    with open("test_input.txt", "w") as f:
-        f.write("hello world\n" * 100)
+    lines = [l for l in result.strip().split("\n") if l]
+    keys_out = [l.split(",")[0] for l in lines]
+    is_sorted = keys_out == sorted(keys_out)
+    print(f"  [{'PASS' if is_sorted else 'FAIL'}] keys in sorted order: {is_sorted}")
 
-    # append
-    print("\n" + dfs.append("music.txt", "test_input.txt"))
-    print("\nstat after append:")
-    print(dfs.stat("music.txt"))
+def test_replication():
+    separator("replication")
+    dfs(5004, "touch", file_name="rep.txt")
 
-    # read
-    print("\nread (first 50 chars):")
-    print(dfs.read("music.txt")[:50])
+    with open("tmp/rep.txt", "w") as f:
+        f.write("replicated content\n" * 5)
 
-    # head
-    print("\nhead 3:")
-    print(dfs.head("music.txt", 3))
+    dfs(5004, "append", file_name="rep.txt", local_path="tmp/rep.txt")
+    result = dfs(5004, "stat", file_name="rep.txt")
+    check("stat shows replicas", result, "replica_nodes")
+    print(f"  [INFO] stat:\n{result}")
 
-    # tail
-    print("\ntail 3:")
-    print(dfs.tail("music.txt", 3))
+def test_paxos():
+    separator("Paxos")
+    dfs(5004, "touch", file_name="paxos.txt")
 
-    # ls
-    print("\nls:")
-    print(dfs.ls())
+    with open("tmp/paxos.txt", "w") as f:
+        f.write("paxos test content\n" * 5)
 
-    # touch a second file
-    dfs.touch("notes.txt")
-    print("\nls after second touch:")
-    print(dfs.ls())
+    result = dfs(5004, "append", file_name="paxos.txt", local_path="tmp/paxos.txt")
+    check("append triggers Paxos commit", result, "SUCCESS")
 
-    # delete
-    print("\n" + dfs.delete_file("music.txt"))
-    print("\nls after delete:")
-    print(dfs.ls())
+    result = dfs(5004, "read", file_name="paxos.txt")
+    check("read after Paxos commit", result, "paxos test content")
 
-    # read deleted file
-    print("\nread after delete:")
-    print(dfs.read("music.txt"))
+def test_failure():
+    separator("failure scenario")
+
+    dfs(5004, "touch", file_name="failure.txt")
+    with open("tmp/failure.txt", "w") as f:
+        f.write("before crash\n" * 5)
+    dfs(5004, "append", file_name="failure.txt", local_path="tmp/failure.txt")
+
+    # crash node 44
+    crashed = PROCESSES[-1]
+    print(f"  Crashing node 44 (pid={crashed.pid})")
+    crashed.terminate()
+    crashed.wait(timeout=3)
+    time.sleep(1)
+
+    # append should still work with remaining nodes
+    with open("tmp/after_crash.txt", "w") as f:
+        f.write("after crash\n" * 5)
+    result = dfs(5004, "append", file_name="failure.txt", local_path="tmp/after_crash.txt")
+    check("append after crash succeeds", result, "SUCCESS")
+    result = dfs(5004, "ls")
+    check("result for ls", result)
+    result = dfs(5004, "read", file_name="failure.txt")
+    check("read after crash returns content", result, "before crash")
+    check("read contains post-crash content", result, "after crash")
+
+# ------------------------------------------------------------------ #
+#  main                                                                #
+# ------------------------------------------------------------------ #
 
 if __name__ == "__main__":
-    chord = make_ring()
-    test_ring(chord)
-    entry = chord.nodes[4]
-    dfs = DFS(chord, entry)
-    test_dfs(dfs)
-    test_sort(dfs)
-    test_replication(chord, dfs)
-    test_paxos(chord, dfs)
+    try:
+        start_nodes()
+        test_chord()
+        test_touch()
+        test_stat()
+        test_append_and_read()
+        test_head_tail()
+        test_ls()
+        test_delete()
+        test_sort()
+        test_replication()
+        test_paxos()
+        test_failure()
+        print("\n=== All Tests Complete ===")
+    except KeyboardInterrupt:
+        print("\nInterrupted")
+    finally:
+        stop_nodes()
