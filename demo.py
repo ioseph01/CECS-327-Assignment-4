@@ -38,7 +38,7 @@ def start_nodes():
             PYTHON, "main.py",
             "--id", str(node_id),
             "--port", str(port),
-            "--bootstrap", f"localhost:{BOOTSTRAP_PORT}"
+            "--bootstrap", f"localhost:{BASE_PORT}"
         ])
         PROCESSES.append(p)
         print(f"Started node {node_id} on port {port} (pid={p.pid})")
