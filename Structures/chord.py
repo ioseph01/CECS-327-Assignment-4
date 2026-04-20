@@ -1,4 +1,4 @@
-from config import M, HOST
+from config import M, HOST, BASE_PORT
 from Structures.finger_table import FingerTable
 from Structures.paxos import Paxos
 from Structures.file_objcts import MetaData
@@ -199,7 +199,7 @@ class Node:
 
   def id_from_address(self, addr):
     _, port = addr.split(":")
-    return int(port) - 5000
+    return int(port) - BASE_PORT
 
 
   def handle_find_succ(self, message: dict):
@@ -323,7 +323,7 @@ class Node:
 
   def id_from_str(self, address: str) -> int:
     _, port = self.parse_address(address)
-    return port - 5000
+    return port - BASE_PORT
 
   def print_info(self):
     print(f"Node {self.id} | address={self.address} | succ={self.succ} | pred={self.pred}")

@@ -2,7 +2,7 @@ from utils.hash import hash_key
 from Structures.file_objcts import Page, MetaData
 from Structures.replica import *
 from Structures.paxos import ProxyNode
-from config import PAGE_SIZE, R
+from config import PAGE_SIZE, R, BASE_PORT
 import bisect
 import uuid
 import time
@@ -37,7 +37,7 @@ class DFS:
 
   def id_from_address(self, address: str):
       _, port = address.split(":")
-      return int(port) - 5000
+      return int(port) - BASE_PORT
 
   def get_replica_node_objects(self, addresses: list):
       return [ProxyNode(addr, self.node) for addr in addresses]

@@ -1,3 +1,4 @@
+from config import BASE_PORT
 from enum import Enum
 
 
@@ -93,7 +94,7 @@ class ProxyNode:
     self.address = address
     self.node = local_node
     _, port = address.split(":")
-    self.id = int(port) - 5000
+    self.id = int(port) - BASE_PORT
     self.alive = True
 
   @property
