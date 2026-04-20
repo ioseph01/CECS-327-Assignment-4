@@ -1,13 +1,11 @@
 # demo.py
+from config import BASE_PORT, SLEEP_JOIN, SLEEP_STAB
 import subprocess
 import sys
 import time
 import os
 
 PYTHON = sys.executable
-BOOTSTRAP_PORT = 5004
-SLEEP_JOIN = 2
-SLEEP_STAB = 15
 SLEEP_CMD = 1
 PROCESSES = []
 
@@ -38,7 +36,7 @@ def start_nodes():
             PYTHON, "main.py",
             "--id", str(node_id),
             "--port", str(port),
-            "--bootstrap", f"localhost:{BOOTSTRAP_PORT}"
+            "--bootstrap", f"localhost:{BASE_PORT}"
         ])
         PROCESSES.append(p)
         print(f"Started node {node_id} on port {port} (pid={p.pid})")
