@@ -290,13 +290,13 @@ class DFS:
       print(f"  SORT: page_key={page_key} type={type(page_key)}")
       addr = self.node.find_succ(page_key)
       print(f"  SORT: routed to {addr}")
-      # check what's actually stored there
-      if addr == self.node.address:
-        raw = self.node.store.get(page_key, None)
-        print(f"  SORT: local raw={str(raw)[:80]}")
-      else:
-        reply = self.node.send(addr, {"type": "get", "key": page_key})
-        print(f"  SORT: remote raw={str(reply)[:80]}")
+      # # check what's actually stored there
+      # if addr == self.node.address:
+      #   raw = self.node.store.get(page_key, None)
+      #   print(f"  SORT: local raw={str(raw)[:80]}")
+      # else:
+      #   reply = self.node.send(addr, {"type": "get", "key": page_key})
+      #   print(f"  SORT: remote raw={str(reply)[:80]}")
       page = self.get_page(page_key)
       print(f"  SORT: page={page}")
       if page is None:
