@@ -1,4 +1,6 @@
 # demo.py
+from config import SLEEP_JOIN, SLEEP_STAB
+from Server.client import send_message
 import subprocess
 import sys
 import time
@@ -6,8 +8,6 @@ import os
 
 PYTHON = sys.executable
 BOOTSTRAP_PORT = 5004
-SLEEP_JOIN = 2
-SLEEP_STAB = 15
 SLEEP_CMD = 1
 PROCESSES = []
 
@@ -50,7 +50,6 @@ def start_nodes():
 
 def check_ring():
     separator("Ring Structure")
-    from Server.client import send_message
     for port in [5004, 5008, 5015, 5027, 5044]:
         pred = send_message("localhost", port, {"type": "get_pred"})
         succ = send_message("localhost", port, {"type": "get_succ"})
@@ -192,17 +191,38 @@ def demo_failure():
 
     print("--- read replicated.txt before crash ---")
     cli(5004, "read", "replicated.txt")
+    cli(5004, "stat", "replicated.txt")
+
+    
+    for port in [5004, 5008, 5015, 5027, 5044]:
+        pred = send_message("localhost", port, {"type": "get_pred"})
+        succ = send_message("localhost", port, {"type": "get_succ"})
+        pred_addr = pred.get("address", "None")
+        succ_addr = succ.get("address", "None")
+        self_id = succ.get("self_id", "?")
+        print(f"  node {self_id:>3} | pred={pred_addr} -> {port} -> succ={succ_addr}")
+        
     time.sleep(SLEEP_CMD)
 
     crashed = PROCESSES[-1]
     print(f"Crashing node 44 (pid={crashed.pid})...")
     crashed.terminate()
     crashed.wait(timeout=3)
-    time.sleep(SLEEP_CMD)
+    print("Waiting for ring to stabilize...")
+    time.sleep(SLEEP_STAB)
+
+    for port in [5004, 5008, 5015, 5027, 5044]:
+        pred = send_message("localhost", port, {"type": "get_pred"})
+        succ = send_message("localhost", port, {"type": "get_succ"})
+        pred_addr = pred.get("address", "None")
+        succ_addr = succ.get("address", "None")
+        self_id = succ.get("self_id", "?")
+        print(f"  node {self_id:>3} | pred={pred_addr} -> {port} -> succ={succ_addr}")
 
     write_tmp("after_crash.txt", "after crash content\n")
+    
 
-    print("--- append after node 44 crash (Paxos majority with 2/3) ---")
+    print("--- append after node 44 crash ---")
     cli(5004, "append", "replicated.txt", "tmp/after_crash.txt")
     time.sleep(SLEEP_CMD)
 
@@ -225,7 +245,7 @@ def demo_cleanup():
     cli(5004, "ls")
     time.sleep(SLEEP_CMD)
 
-    print("--- read deleted file ---")
+    print("--- read deleted file (should error) ---")
     cli(5004, "read", "music.txt")
     time.sleep(SLEEP_CMD)
 

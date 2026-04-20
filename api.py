@@ -74,12 +74,12 @@ class DFS:
 
   def put_metadata(self, metadata):
     replicas = self.get_replica_addresses(metadata.key)
-    # metadata.replica_nodes = replicas
+    metadata.replica_nodes = replicas
 
     lead_addr = min(replicas, key=lambda addr : self.id_from_address(addr))
     if lead_addr == self.node.address:
-      metadata.replica_nodes = self.get_replica_node_objects(replicas)
-      self.node.paxos.l_propose(metadata, metadata.replica_nodes)
+      proxy_nodes = self.get_replica_node_objects(replicas)  # ProxyNodes only for Paxos
+      self.node.paxos.l_propose(metadata, proxy_nodes)
     else:
       self.node.send(lead_addr, {
         "type": "paxos_propose",
@@ -215,8 +215,8 @@ class DFS:
     for page_key in metadata.page_keys:
       self.node.delete(page_key)
 
-    for node in metadata.replica_nodes:
-      addr = node.address
+    for addr in metadata.replica_nodes:
+      # addr = node.address
       if addr == self.node.address:
         self.node.store.pop(metadata.key, None)
       else:
@@ -287,9 +287,7 @@ class DFS:
     # Parse all records from pages
     records = []
     for page_key in metadata.page_keys:
-      print(f"  SORT: page_key={page_key} type={type(page_key)}")
       addr = self.node.find_succ(page_key)
-      print(f"  SORT: routed to {addr}")
       # # check what's actually stored there
       # if addr == self.node.address:
       #   raw = self.node.store.get(page_key, None)
@@ -298,10 +296,8 @@ class DFS:
       #   reply = self.node.send(addr, {"type": "get", "key": page_key})
       #   print(f"  SORT: remote raw={str(reply)[:80]}")
       page = self.get_page(page_key)
-      print(f"  SORT: page={page}")
       if page is None:
         addr = self.node.find_succ(page_key)
-        print(f"  SORT: page_key={page_key} should be at {addr}")
         return f"ERROR: Page missing in file '{file_name}'"
       for line in page.contents.splitlines():
         line = line.strip()

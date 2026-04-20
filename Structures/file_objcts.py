@@ -59,16 +59,7 @@ class MetaData:
     
   #   super().__setattr__(name, value)  
 
-  def _export(self):
-    return {
-      "key": self.key,
-      "file_name": self.file_name,
-      "file_size": self.file_size,
-      "page_keys": self.page_keys,
-      "page_count": self.page_count,
-      "type": self.type,
-      "replica_nodes": [{"id": n.id, "address": n.address} for n in self.replica_nodes]
-    }
+
 
 
   def _export(self) -> dict:
@@ -79,7 +70,7 @@ class MetaData:
         "page_keys": self.page_keys,
         "page_count": self.page_count,
         "type": self.type,
-        "replica_nodes": [{"id": n.id, "address": n.address} for n in self.replica_nodes]
+        "replica_nodes": self.replica_nodes
     }
   
   @classmethod
@@ -89,7 +80,7 @@ class MetaData:
         file_name=data["file_name"],
         page_keys=data.get("page_keys", []),
         file_size=data["file_size"],
-        replica_nodes=[ProxyNode(node['address'], node['id']) for node in data.get("replica_nodes")],
+        replica_nodes=data.get("replica_nodes", [])
     )
   
   

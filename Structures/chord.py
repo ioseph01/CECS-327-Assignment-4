@@ -160,7 +160,18 @@ class Node:
 
     reply = self.send(self.succ, {"type": "get_pred"})
     if reply.get("status") == "error":
-      self.succ = self.address
+      for entry in self.finger_table.entries:
+            if entry.address and entry.address != self.succ:
+                test = self.send(entry.address, {"type": "get_succ"})
+                if test.get("status") == "ok":
+                    self.succ = entry.address
+                    print(f"[Node {self.id}] Dead successor detected, updated succ to {self.succ}")
+                    self.send(self.succ, {
+                        "type": "notify",
+                        "id": self.id,
+                        "address": self.address,
+                    })
+                    return
       return
     pred = reply.get("address")
     if pred is not None and pred != self.address:
@@ -173,6 +184,8 @@ class Node:
       "id": self.id,
       "address": self.address,
     })
+
+    
   def notify(self, sender_id, sender_addr):
       if sender_addr is None or sender_addr == self.address:
           return
@@ -180,9 +193,17 @@ class Node:
       if self.pred is None:
           self.pred = sender_addr
       else:
+          test = self.send(self.pred, {"type": "get_succ"})
+          if test.get("status") == "error":
+              # predecessor is dead, accept new candidate
+              print(f"[Node {self.id}] Dead Predecessor detected, updating to {sender_addr}")
+              self.pred = sender_addr
+              return
+        
           pred_id = self.id_from_address(self.pred)
           if self.in_range_open(sender_id, pred_id, self.id):
-              self.pred = sender_addr
+            print(f"[Node {self.id}] updating pred to {sender_addr}")
+            self.pred = sender_addr
       # Bootstrap fix: if we still point to ourselves, any notifier is a better successor candidate
       if self.succ == self.address or self.succ is None:
           self.succ = sender_addr
